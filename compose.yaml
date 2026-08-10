@@ -1,0 +1,143 @@
+name: ${COMPOSE_PROJECT_NAME:-tracelink}
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: infra/docker/frontend.Dockerfile
+      target: development
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      WATCHPACK_POLLING: "true"
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ./apps/frontend:/app
+      - frontend_node_modules:/app/node_modules
+      - frontend_next:/app/.next
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  backend:
+    build:
+      context: .
+      dockerfile: infra/docker/backend.Dockerfile
+      target: development
+    environment:
+      APP_NAME: TraceLink API
+      ENVIRONMENT: development
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tracelink}:${POSTGRES_PASSWORD:-tracelink_dev}@postgres:5432/${POSTGRES_DB:-tracelink}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    user: tracelink
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./apps/backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/backend.Dockerfile
+      target: development
+    command:
+      [
+        "celery",
+        "--app",
+        "tracelink.jobs.celery_app:celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--concurrency=2",
+        "--hostname=worker@%h",
+      ]
+    environment:
+      ENVIRONMENT: development
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tracelink}:${POSTGRES_PASSWORD:-tracelink_dev}@postgres:5432/${POSTGRES_DB:-tracelink}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    user: tracelink
+    volumes:
+      - ./apps/backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery --app tracelink.jobs.celery_app:celery_app inspect ping --destination worker@$$HOSTNAME --timeout 5 | grep -q pong",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 15s
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tracelink}
+      POSTGRES_USER: ${POSTGRES_USER:-tracelink}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tracelink_dev}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  frontend_next:
+  frontend_node_modules:
+  postgres_data:
+  redis_data:

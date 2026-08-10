@@ -1,0 +1,38 @@
+{
+  "name": "tracelink-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@11.6.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@types/node": "22.19.11",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.1.4",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "28.1.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vitest": "4.1.0"
+  }
+}
