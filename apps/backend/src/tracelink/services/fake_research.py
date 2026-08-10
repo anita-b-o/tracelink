@@ -41,9 +41,14 @@ class FakeResearchExecutor:
         ):
             raise FakeResearchError(f"simulated failure for {research_task.type.value}")
         return {
-            "kind": "fake_research",
-            "task_type": research_task.type.value,
-            "attempt": research_task.attempts,
-            "summary": f"Simulated {research_task.type.value.lower()} result",
-            "items": [],
+            "connector": "fake_research",
+            "status": "success",
+            "source_ids": [],
+            "document_ids": [],
+            "result_count": 0,
+            "metadata": {
+                "task_type": research_task.type.value,
+                "attempt": research_task.attempts,
+                "simulated": True,
+            },
         }

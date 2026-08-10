@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from tracelink.api.router import api_router
+from tracelink.connectors.http import close_research_http_client
 from tracelink.core.config import get_settings
 from tracelink.core.logging import configure_logging
 from tracelink.infrastructure.database import close_database
@@ -17,6 +18,7 @@ configure_logging(settings.log_level)
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
+    await close_research_http_client()
     await close_database()
     await close_redis()
 

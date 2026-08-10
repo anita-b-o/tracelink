@@ -9,8 +9,10 @@ description = "TraceLink OSINT research API"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "alembic>=1.18,<2",
+  "beautifulsoup4>=4.14,<5",
   "celery[redis]>=5.6,<6",
   "fastapi>=0.141,<1",
+  "httpx>=0.28,<1",
   "pgvector>=0.4,<1",
   "psycopg[binary]>=3.3,<4",
   "pydantic-settings>=2.12,<3",
@@ -21,7 +23,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "httpx>=0.28,<1",
   "mypy>=1.19,<2",
   "pip-tools>=7.5,<8",
   "pytest>=9.0,<10",
@@ -42,6 +43,7 @@ pythonpath = ["src"]
 markers = [
   "integration: requires a real PostgreSQL server with pgvector",
   "celery_smoke: requires a real Redis broker and Celery worker process",
+  "real_smoke: performs a small request against stable public Internet sources",
 ]
 
 [tool.ruff]

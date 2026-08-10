@@ -27,8 +27,8 @@ async def not_cancelled() -> bool:
 @pytest.mark.parametrize("mode", [FakeResearchMode.SUCCESS, FakeResearchMode.SLOW])
 async def test_fake_executor_success_modes(mode: FakeResearchMode) -> None:
     result = await FakeResearchExecutor(0).execute(task(), mode=mode, is_cancelled=not_cancelled)
-    assert result["kind"] == "fake_research"
-    assert result["task_type"] == ResearchTaskType.IDENTIFY_ENTITY.value
+    assert result["connector"] == "fake_research"
+    assert result["metadata"]["task_type"] == ResearchTaskType.IDENTIFY_ENTITY.value
 
 
 async def test_fake_executor_fail_once_is_deterministic() -> None:
@@ -40,7 +40,7 @@ async def test_fake_executor_fail_once_is_deterministic() -> None:
     result = await executor.execute(
         task(attempts=2), mode=FakeResearchMode.FAIL_ONCE, is_cancelled=not_cancelled
     )
-    assert result["attempt"] == 2
+    assert result["metadata"]["attempt"] == 2
 
 
 async def test_fake_executor_always_fail() -> None:

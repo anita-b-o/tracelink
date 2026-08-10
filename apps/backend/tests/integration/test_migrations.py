@@ -11,6 +11,17 @@ pytestmark = pytest.mark.integration
 @pytest.mark.asyncio
 async def test_migration_round_trip(migrated_database_url: str) -> None:
     _ = migrated_database_url
+    command.downgrade(alembic_config(), "0002_investigation_workflow")
+    async with get_engine().connect() as connection:
+        normalized_url_before_upgrade = await connection.scalar(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = 'sources' "
+                "AND column_name = 'normalized_url'"
+            )
+        )
+    assert normalized_url_before_upgrade is None
+    command.upgrade(alembic_config(), "head")
     command.downgrade(alembic_config(), "0001_core_domain")
     command.upgrade(alembic_config(), "head")
     command.downgrade(alembic_config(), "0001_core_domain")
@@ -25,6 +36,15 @@ async def test_migration_round_trip(migrated_database_url: str) -> None:
                 text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
             )
         )
+        source_columns = set(
+            await connection.scalars(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = 'sources'"
+                )
+            )
+        )
 
     assert extension == "vector"
     assert {"investigations", "entities", "relationships", "embedding_records"} <= tables
+    assert "normalized_url" in source_columns

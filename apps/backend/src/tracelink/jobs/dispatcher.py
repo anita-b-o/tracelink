@@ -14,7 +14,7 @@ class ResearchTaskDispatcher(Protocol):
         self,
         research_task_id: UUID,
         *,
-        mode: FakeResearchMode = FakeResearchMode.SUCCESS,
+        mode: FakeResearchMode | None = None,
     ) -> str: ...
 
 
@@ -23,7 +23,7 @@ class CeleryResearchTaskDispatcher:
         self,
         research_task_id: UUID,
         *,
-        mode: FakeResearchMode = FakeResearchMode.SUCCESS,
+        mode: FakeResearchMode | None = None,
     ) -> str:
         from tracelink.jobs.research import execute_research_task
 
@@ -31,7 +31,7 @@ class CeleryResearchTaskDispatcher:
         try:
             await asyncio.to_thread(
                 execute_research_task.apply_async,
-                args=[str(research_task_id), mode.value],
+                args=[str(research_task_id), mode.value if mode is not None else None],
                 task_id=celery_task_id,
             )
         except Exception as exc:

@@ -2,9 +2,8 @@
 
 ## Alcance
 
-La Fase 2 ejecuta un plan de investigación deliberadamente simulado. Valida estados,
-persistencia, concurrencia, Celery, Redis, reintentos y cancelación sin consultar fuentes reales ni
-crear entidades, relaciones o evidencia falsa.
+La Fase 3 conserva el plan y sus estados, pero enruta las tasks con semántica disponible a
+connectors reales. Continúa sin crear entidades, relaciones o evidencia falsa.
 
 PostgreSQL es la fuente de verdad del workflow. Redis transporta mensajes de Celery; el result
 backend de Celery no reemplaza el resultado persistido en `research_tasks.result`.
@@ -43,15 +42,15 @@ El planner crea una task de cada tipo: `IDENTIFY_ENTITY`, `WEB_SEARCH`, `DOMAIN_
 `(investigation_id, type)` es única y el insert usa `ON CONFLICT DO NOTHING`, por lo que repetir el
 planner no duplica trabajo.
 
-El fake executor genera un objeto JSON con tipo, intento, resumen simulado e items vacíos. Sus
-modos internos son `SUCCESS`, `FAIL_ONCE`, `ALWAYS_FAIL` y `SLOW`; no forman parte del contrato
-HTTP. El delay base se configura con `FAKE_RESEARCH_DELAY_MS`.
+El resultado contiene connector, status, IDs de Sources/Documents, count y metadata acotada. Los
+bodies viven en Document. El fake executor conserva `SUCCESS`, `FAIL_ONCE`, `ALWAYS_FAIL` y `SLOW`
+para tests y task types diferidos; no forman parte del contrato HTTP.
 
 El flujo normal es:
 
 ```text
 POST /start -> lock Investigation -> plan + PENDING -> commit -> publish Celery
-worker -> claim RUNNING -> fake executor -> COMPLETED/FAILED -> estado agregado
+worker -> claim RUNNING -> connector router -> persist + COMPLETED/FAILED -> estado agregado
 ```
 
 La aplicación Celery usa mensajes JSON, late acknowledgement, rechazo ante pérdida del worker y
@@ -85,12 +84,13 @@ resultado/completion/job activo y vuelve a PENDING.
 
 Los retries de infraestructura son distintos: un error transitorio de conexión SQLAlchemy puede
 usar `Task.retry` de Celery hasta `CELERY_TRANSPORT_MAX_RETRIES`, conservando el mismo intento de
-dominio. Un fallo determinista del executor se persiste y no dispara retry automático.
+dominio. Los connectors reintentan fallos HTTP transitorios internamente; un fallo final se
+persiste y no dispara retry de dominio automático.
 
 ## Cancelación, agregación y progreso
 
 Cancelar marca la Investigation como CANCELLED y cancela inmediatamente sus tasks PENDING. Las
-RUNNING consultan cooperativamente PostgreSQL durante el fake delay y antes de persistir. La
+RUNNING consultan cooperativamente PostgreSQL antes y después del connector. La
 finalización vuelve a bloquear el aggregate; un resultado tardío nunca puede reemplazar CANCELLED.
 
 La política agregada es única:

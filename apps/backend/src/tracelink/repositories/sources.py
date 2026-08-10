@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tracelink.connectors.url_safety import normalize_url
 from tracelink.domain.models import JsonObject, Source
 from tracelink.domain.normalization import sha256_text
 from tracelink.domain.validation import require_non_empty
@@ -21,6 +22,7 @@ class SourceRepository:
         *,
         source_type: str,
         url: str,
+        normalized_url: str | None = None,
         publisher: str | None = None,
         title: str | None = None,
         published_at: datetime | None = None,
@@ -28,11 +30,13 @@ class SourceRepository:
         metadata: JsonObject | None = None,
     ) -> Source:
         stored_url = require_non_empty(url.strip(), "url")
+        stored_normalized_url = normalize_url(normalized_url or stored_url)
         values: dict[str, object] = {
             "type": require_non_empty(source_type.strip(), "source_type"),
             "publisher": publisher,
             "url": stored_url,
-            "url_hash": sha256_text(stored_url),
+            "normalized_url": stored_normalized_url,
+            "url_hash": sha256_text(stored_normalized_url),
             "title": title,
             "published_at": published_at,
             "metadata_": metadata or {},
@@ -58,10 +62,13 @@ class SourceRepository:
         return list(result)
 
     async def find_by_url(self, url: str) -> builtins.list[Source]:
-        stored_url = require_non_empty(url.strip(), "url")
+        stored_url = normalize_url(require_non_empty(url.strip(), "url"))
         result = await self.session.scalars(
             select(Source)
-            .where(Source.url_hash == sha256_text(stored_url), Source.url == stored_url)
+            .where(
+                Source.url_hash == sha256_text(stored_url),
+                Source.normalized_url == stored_url,
+            )
             .order_by(Source.retrieved_at.desc(), Source.id.desc())
         )
         return list(result)

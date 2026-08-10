@@ -192,10 +192,12 @@ class Relationship(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class Source(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "sources"
+    __table_args__ = (Index("ix_sources_url_identity", "url_hash", "normalized_url"),)
 
     type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     publisher: Mapped[str | None] = mapped_column(String(300))
     url: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_url: Mapped[str] = mapped_column(Text, nullable=False)
     url_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     title: Mapped[str | None] = mapped_column(String(500))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

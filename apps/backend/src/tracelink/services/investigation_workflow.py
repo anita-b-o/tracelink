@@ -3,6 +3,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tracelink.connectors.models import ConnectorOutput, ResearchTaskResult
 from tracelink.core.config import Settings
 from tracelink.domain.enums import InvestigationStatus, ResearchTaskStatus
 from tracelink.domain.models import Investigation, JsonObject, ResearchTask
@@ -20,6 +21,7 @@ from tracelink.services.errors import (
     DomainNotFoundError,
     DomainRetryLimitError,
 )
+from tracelink.services.research_artifacts import ResearchArtifactService
 from tracelink.services.research_planner import ResearchPlanner
 
 
@@ -170,25 +172,53 @@ class InvestigationWorkflowService:
 
     async def complete(
         self, research_task_id: UUID, celery_task_id: str, result: JsonObject
-    ) -> None:
+    ) -> bool:
         locked = await self._lock_aggregate(research_task_id)
         if locked is None:
-            return
+            return False
         investigation, task, tasks = locked
         if investigation.status is InvestigationStatus.CANCELLED:
             if task.status is ResearchTaskStatus.RUNNING:
                 transition_research_task(task, ResearchTaskStatus.CANCELLED)
             await self.session.flush()
-            return
+            return False
         if (
             task.status is not ResearchTaskStatus.RUNNING
             or task.active_celery_task_id != celery_task_id
         ):
-            return
+            return False
         transition_research_task(task, ResearchTaskStatus.COMPLETED)
         task.result = result
         self._recalculate(investigation, tasks)
         await self.session.flush()
+        return True
+
+    async def complete_with_output(
+        self,
+        research_task_id: UUID,
+        celery_task_id: str,
+        output: ConnectorOutput,
+    ) -> bool:
+        locked = await self._lock_aggregate(research_task_id)
+        if locked is None:
+            return False
+        investigation, task, tasks = locked
+        if investigation.status is InvestigationStatus.CANCELLED:
+            if task.status is ResearchTaskStatus.RUNNING:
+                transition_research_task(task, ResearchTaskStatus.CANCELLED)
+            await self.session.flush()
+            return False
+        if (
+            task.status is not ResearchTaskStatus.RUNNING
+            or task.active_celery_task_id != celery_task_id
+        ):
+            return False
+        result = await ResearchArtifactService(self.session).persist(output)
+        transition_research_task(task, ResearchTaskStatus.COMPLETED)
+        task.result = result.model_dump(mode="json")
+        self._recalculate(investigation, tasks)
+        await self.session.flush()
+        return True
 
     async def fail(
         self,
@@ -197,6 +227,7 @@ class InvestigationWorkflowService:
         *,
         error_code: str,
         error_message: str,
+        failure_result: ResearchTaskResult | None = None,
     ) -> None:
         locked = await self._lock_aggregate(research_task_id)
         if locked is None:
@@ -215,6 +246,8 @@ class InvestigationWorkflowService:
         transition_research_task(task, ResearchTaskStatus.FAILED)
         task.last_error_code = error_code
         task.last_error_message = error_message
+        if failure_result is not None:
+            task.result = failure_result.model_dump(mode="json")
         self._recalculate(investigation, tasks)
         await self.session.flush()
 

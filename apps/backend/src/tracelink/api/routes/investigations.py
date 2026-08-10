@@ -10,6 +10,18 @@ from tracelink.api.schemas.investigations import (
     InvestigationRead,
 )
 from tracelink.api.schemas.research_tasks import ResearchTaskRead
+from tracelink.api.schemas.sources import UrlIngestionCreate
+from tracelink.connectors.errors import (
+    ConnectorError,
+    ConnectorFetchError,
+    ConnectorRateLimitError,
+    ConnectorTimeoutError,
+    ResponseTooLargeError,
+    UnsafeUrlError,
+    UnsupportedContentTypeError,
+)
+from tracelink.connectors.models import ConnectorContext, ResearchTaskResult
+from tracelink.connectors.registry import ConnectorRegistry, get_connector_registry
 from tracelink.core.config import get_settings
 from tracelink.infrastructure.database import get_session
 from tracelink.jobs.dispatcher import (
@@ -20,10 +32,12 @@ from tracelink.jobs.dispatcher import (
 from tracelink.repositories.investigations import InvestigationRepository
 from tracelink.services.errors import DomainConflictError, DomainNotFoundError
 from tracelink.services.investigation_workflow import InvestigationWorkflowService
+from tracelink.services.research_artifacts import ResearchArtifactService
 
 router = APIRouter()
 Session = Annotated[AsyncSession, Depends(get_session)]
 Dispatcher = Annotated[ResearchTaskDispatcher, Depends(get_research_task_dispatcher)]
+Connectors = Annotated[ConnectorRegistry, Depends(get_connector_registry)]
 
 
 def raise_workflow_http_error(exc: ValueError) -> NoReturn:
@@ -32,6 +46,24 @@ def raise_workflow_http_error(exc: ValueError) -> NoReturn:
     if isinstance(exc, DomainConflictError):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     raise exc
+
+
+def raise_connector_http_error(exc: ConnectorError) -> NoReturn:
+    if isinstance(exc, UnsafeUrlError):
+        status_code = status.HTTP_400_BAD_REQUEST
+    elif isinstance(exc, UnsupportedContentTypeError):
+        status_code = status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+    elif isinstance(exc, ResponseTooLargeError):
+        status_code = status.HTTP_413_CONTENT_TOO_LARGE
+    elif isinstance(exc, ConnectorRateLimitError):
+        status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    elif isinstance(exc, ConnectorTimeoutError):
+        status_code = status.HTTP_504_GATEWAY_TIMEOUT
+    elif isinstance(exc, ConnectorFetchError):
+        status_code = status.HTTP_502_BAD_GATEWAY
+    else:
+        status_code = status.HTTP_400_BAD_REQUEST
+    raise HTTPException(status_code=status_code, detail=exc.public_message) from exc
 
 
 @router.post("", response_model=InvestigationRead, status_code=status.HTTP_201_CREATED)
@@ -54,6 +86,33 @@ async def get_investigation(investigation_id: UUID, session: Session) -> object:
     if investigation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="investigation not found")
     return investigation
+
+
+@router.post(
+    "/{investigation_id}/sources/url",
+    response_model=ResearchTaskResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def ingest_investigation_url(
+    investigation_id: UUID,
+    payload: UrlIngestionCreate,
+    session: Session,
+    connectors: Connectors,
+) -> object:
+    if await InvestigationRepository(session).get_by_id(investigation_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="investigation not found")
+    await session.commit()
+    connector = connectors.get_connector("url_ingestion")
+    try:
+        output = await connector.execute(
+            payload.url,
+            ConnectorContext(investigation_id=investigation_id),
+        )
+    except ConnectorError as exc:
+        raise_connector_http_error(exc)
+    if await InvestigationRepository(session).get_by_id(investigation_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="investigation not found")
+    return await ResearchArtifactService(session).persist(output)
 
 
 @router.post(

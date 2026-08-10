@@ -2,7 +2,9 @@ import asyncio
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
+from tracelink.connectors.http import close_research_http_client
 from tracelink.infrastructure.database import close_database
+from tracelink.infrastructure.redis import close_redis
 
 ResultT = TypeVar("ResultT")
 
@@ -21,7 +23,9 @@ class AsyncWorkerRuntime:
     def close(self) -> None:
         if self._runner is None:
             return
+        self._runner.run(close_research_http_client())
         self._runner.run(close_database())
+        self._runner.run(close_redis())
         self._runner.close()
         self._runner = None
 

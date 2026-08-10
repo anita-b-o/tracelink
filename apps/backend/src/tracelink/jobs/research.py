@@ -5,6 +5,9 @@ from uuid import UUID
 from celery import Task
 from sqlalchemy.exc import OperationalError
 
+from tracelink.connectors.errors import ConnectorError
+from tracelink.connectors.models import ResearchTaskResult
+from tracelink.connectors.registry import ConnectorRegistry, get_connector_registry
 from tracelink.core.config import get_settings
 from tracelink.domain.enums import FakeResearchMode
 from tracelink.infrastructure.database import get_session_factory
@@ -16,6 +19,7 @@ from tracelink.services.fake_research import (
     FakeResearchExecutor,
 )
 from tracelink.services.investigation_workflow import InvestigationWorkflowService
+from tracelink.services.research_execution import ConnectorResearchExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +27,8 @@ logger = logging.getLogger(__name__)
 async def execute_research_task_async(
     research_task_id: UUID,
     celery_task_id: str,
-    mode: FakeResearchMode,
+    mode: FakeResearchMode | None,
+    registry: ConnectorRegistry | None = None,
 ) -> None:
     settings = get_settings()
     session_factory = get_session_factory()
@@ -53,10 +58,24 @@ async def execute_research_task_async(
                 task.investigation_id
             )
 
+    output = None
+    connector_name = "fake_research"
+    if mode is None:
+        configured_registry = registry or get_connector_registry()
+        connectors = configured_registry.connectors_for_task_type(task.type)
+        connector_name = connectors[0].name if connectors else "fake_research"
     try:
-        result = await FakeResearchExecutor(settings.fake_research_delay_ms).execute(
-            task, mode=mode, is_cancelled=is_cancelled
-        )
+        if mode is not None:
+            result = await FakeResearchExecutor(settings.fake_research_delay_ms).execute(
+                task, mode=mode, is_cancelled=is_cancelled
+            )
+            output = None
+        else:
+            output = await ConnectorResearchExecutor(configured_registry).execute(
+                task, is_cancelled=is_cancelled
+            )
+            connector_name = output.connector
+            result = None
     except FakeResearchCancelled:
         async with session_factory() as session, session.begin():
             await InvestigationWorkflowService(session, settings).acknowledge_cancellation(
@@ -69,25 +88,63 @@ async def execute_research_task_async(
                 research_task_id,
                 celery_task_id,
                 error_code=exc.code,
-                error_message=str(exc),
+                error_message="simulated research failure",
+                failure_result=ResearchTaskResult(
+                    connector="fake_research",
+                    status="failed",
+                    metadata={"error_code": exc.code},
+                ),
             )
         logger.warning("research task failed", extra={**context, "status": "FAILED"})
+    except ConnectorError as exc:
+        async with session_factory() as session, session.begin():
+            await InvestigationWorkflowService(session, settings).fail(
+                research_task_id,
+                celery_task_id,
+                error_code=exc.code,
+                error_message=exc.public_message,
+                failure_result=ResearchTaskResult(
+                    connector=connector_name,
+                    status="failed",
+                    metadata={
+                        "error_code": exc.code,
+                        **({"status_code": exc.status_code} if exc.status_code else {}),
+                    },
+                ),
+            )
+        logger.warning(
+            "research connector task failed",
+            extra={
+                **context,
+                "status": "FAILED",
+                "connector": connector_name,
+                "status_code": exc.status_code,
+            },
+        )
     except OperationalError:
         raise
-    except Exception as exc:
+    except Exception:
         logger.exception("research task failed unexpectedly", extra=context)
         async with session_factory() as session, session.begin():
             await InvestigationWorkflowService(session, settings).fail(
                 research_task_id,
                 celery_task_id,
                 error_code="UNEXPECTED_EXECUTOR_ERROR",
-                error_message=str(exc),
+                error_message="research execution failed unexpectedly",
+                failure_result=ResearchTaskResult(
+                    connector="unknown",
+                    status="failed",
+                    metadata={"error_code": "UNEXPECTED_EXECUTOR_ERROR"},
+                ),
             )
     else:
         async with session_factory() as session, session.begin():
-            await InvestigationWorkflowService(session, settings).complete(
-                research_task_id, celery_task_id, result
-            )
+            workflow = InvestigationWorkflowService(session, settings)
+            if output is not None:
+                await workflow.complete_with_output(research_task_id, celery_task_id, output)
+            else:
+                assert result is not None
+                await workflow.complete(research_task_id, celery_task_id, result)
         logger.info("research task completed", extra={**context, "status": "COMPLETED"})
 
 
@@ -101,12 +158,14 @@ async def execute_research_task_async(
 def execute_research_task(
     self: Task,
     research_task_id: str,
-    mode: str = FakeResearchMode.SUCCESS.value,
+    mode: str | None = None,
 ) -> None:
     try:
         async_worker_runtime.run(
             execute_research_task_async(
-                UUID(research_task_id), str(self.request.id), FakeResearchMode(mode)
+                UUID(research_task_id),
+                str(self.request.id),
+                FakeResearchMode(mode) if mode is not None else None,
             )
         )
     except OperationalError as exc:

@@ -2,7 +2,7 @@
 
 ## Alcance
 
-El núcleo persistente y auditable incluye el workflow simulado de Fase 2. El grafo de entidades,
+El núcleo persistente y auditable incluye el workflow con connectors de Fase 3. El grafo de entidades,
 fuentes y documentos es compartido entre investigaciones; evidence y findings pertenecen a una
 investigación. Todavía no existen autenticación, conectores, extracción automática ni RAG.
 
@@ -19,7 +19,7 @@ los modelos SQLAlchemy porque `metadata` está reservado por la API declarativa.
 | `entities` | Nodo canónico del grafo | nombre canónico y forma normalizada; nombres iguales no implican identidad |
 | `entity_aliases` | Nombre alternativo de una entidad | único por entidad y alias normalizado; no repite el nombre canónico |
 | `relationships` | Arista dirigida entre entidades | sin self-reference; confidence 0..1; única por origen, destino y tipo |
-| `sources` | Recuperación concreta de una URL | URL no única; SHA-256 de URL indexado para localizar versiones exactas |
+| `sources` | Identidad estable de una URL pública | URL normalizada y SHA-256 indexados; writes serializados por advisory lock |
 | `documents` | Contenido textual recuperado | SHA-256 de UTF-8; único por source y hash |
 | `evidence` | Evidencia que respalda un nodo o una relación | requiere entity o relationship; confidence 0..1 |
 | `findings` | Conclusión de una investigación | confidence y relevance opcional 0..1 |
@@ -50,10 +50,10 @@ no se translitera y no existe fuzzy matching. La búsqueda por nombre puede devo
 entidades porque dos personas o empresas distintas pueden compartir nombre.
 
 Los aliases se deduplican por `(entity_id, normalized_alias)`. Las relationships se deduplican como
-aristas dirigidas por `(source_entity_id, target_entity_id, type)`. Una misma URL puede producir
-múltiples sources; `url_hash` acelera la búsqueda exacta sin impedir versionado. El contenido se
-deduplica dentro de cada source por `(source_id, content_hash)` y el índice global del hash permite
-detectar copias entre fuentes sin perder procedencia.
+aristas dirigidas por `(source_entity_id, target_entity_id, type)`. La URL normalizada descarta
+fragmentos, puertos default y casing del host sin reordenar query ni cambiar trailing slashes no
+raíz. Los nuevos fetches reutilizan la Source bajo advisory lock; filas legacy no se eliminan. El
+contenido se deduplica por `(source_id, content_hash)` sin perder procedencia entre URLs.
 
 La columna `embedding` usa `vector` sin dimensión. La dimensión, modelo, métrica e índice se
 definirán en la fase de RAG con datos y proveedor conocidos.
@@ -77,6 +77,6 @@ Fase 1 no expone operaciones de borrado.
 - `(research_task.investigation_id, research_task.type)` único para idempotencia del planner;
 - `(entity.type, entity.normalized_name)`, normalized name y normalized aliases;
 - ambos extremos de relationships y el par origen/destino;
-- `sources.url_hash`, type y retrieved_at;
+- `(sources.url_hash, sources.normalized_url)`, type y retrieved_at;
 - `documents.content_hash` y claves foráneas de evidence;
 - `(document_id, chunk_index)` único en embedding records.

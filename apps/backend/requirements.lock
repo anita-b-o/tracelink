@@ -14,12 +14,19 @@ annotated-types==0.8.0
     # via pydantic
 anyio==4.14.2
     # via
+    #   httpx
     #   starlette
     #   watchfiles
+beautifulsoup4==4.15.0
+    # via tracelink-backend (pyproject.toml)
 billiard==4.2.4
     # via celery
 celery==5.6.3
     # via tracelink-backend (pyproject.toml)
+certifi==2026.7.22
+    # via
+    #   httpcore
+    #   httpx
 click==8.4.2
     # via
     #   celery
@@ -38,11 +45,19 @@ fastapi==0.141.1
 greenlet==3.5.5
     # via sqlalchemy
 h11==0.16.0
-    # via uvicorn
+    # via
+    #   httpcore
+    #   uvicorn
+httpcore==1.0.9
+    # via httpx
 httptools==0.8.0
     # via uvicorn
+httpx==0.28.1
+    # via tracelink-backend (pyproject.toml)
 idna==3.18
-    # via anyio
+    # via
+    #   anyio
+    #   httpx
 kombu==5.6.2
     # via celery
 mako==1.4.1
@@ -81,6 +96,8 @@ redis==6.4.0
     #   tracelink-backend (pyproject.toml)
 six==1.17.0
     # via python-dateutil
+soupsieve==2.9.2
+    # via beautifulsoup4
 sqlalchemy==2.0.51
     # via
     #   alembic
@@ -91,6 +108,7 @@ typing-extensions==4.16.0
     # via
     #   alembic
     #   anyio
+    #   beautifulsoup4
     #   fastapi
     #   psycopg
     #   pydantic

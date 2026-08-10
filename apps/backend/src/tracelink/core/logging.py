@@ -22,6 +22,12 @@ class JsonFormatter(logging.Formatter):
             "celery_task_id",
             "task_type",
             "status",
+            "connector",
+            "url_host",
+            "status_code",
+            "duration_ms",
+            "cache_hit",
+            "retry_count",
         ):
             value = getattr(record, field, None)
             if value is not None:
