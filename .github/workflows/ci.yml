@@ -15,13 +15,13 @@ jobs:
       postgres:
         image: pgvector/pgvector:pg17
         env:
-          POSTGRES_DB: tracelink
+          POSTGRES_DB: tracelink_test
           POSTGRES_USER: tracelink
           POSTGRES_PASSWORD: tracelink_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U tracelink -d tracelink"
+          --health-cmd "pg_isready -U tracelink -d tracelink_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
@@ -39,7 +39,8 @@ jobs:
         working-directory: apps/backend
     env:
       ENVIRONMENT: test
-      DATABASE_URL: postgresql+psycopg://tracelink:tracelink_test@localhost:5432/tracelink
+      DATABASE_URL: postgresql+psycopg://tracelink:tracelink_test@localhost:5432/tracelink_test
+      TEST_DATABASE_URL: postgresql+psycopg://tracelink:tracelink_test@localhost:5432/tracelink_test
       REDIS_URL: redis://localhost:6379/0
       CELERY_BROKER_URL: redis://localhost:6379/1
       CELERY_RESULT_BACKEND: redis://localhost:6379/2
@@ -59,10 +60,13 @@ jobs:
           ruff check .
           ruff format --check .
           mypy
-      - name: Test
-        run: pytest
-      - name: Validate Alembic connectivity
-        run: alembic current
+      - name: Validate migrations and test
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+          alembic check
+          pytest
 
   frontend:
     runs-on: ubuntu-latest
@@ -95,10 +99,16 @@ jobs:
         run: docker compose up --build --detach --wait --wait-timeout 240
       - name: Verify public endpoints
         run: |
+          docker compose exec -T backend alembic upgrade head
           curl --fail --silent --show-error http://localhost:3000 > /dev/null
           curl --fail --silent --show-error http://localhost:8000/api/health/live > /dev/null
           curl --fail --silent --show-error http://localhost:8000/api/health/ready > /dev/null
           curl --fail --silent --show-error http://localhost:8000/openapi.json > /dev/null
+          curl --fail --silent --show-error \
+            --header 'Content-Type: application/json' \
+            --data '{"title":"CI smoke","original_query":"Verify core domain"}' \
+            http://localhost:8000/api/investigations > /dev/null
+          curl --fail --silent --show-error http://localhost:8000/api/investigations > /dev/null
       - name: Show logs on failure
         if: failure()
         run: docker compose logs --no-color

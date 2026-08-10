@@ -4,8 +4,9 @@ TraceLink será un sistema web de investigación OSINT asistida por IA para due 
 empresas y personas. Su principio central es que cada entidad, relación y conclusión debe poder
 rastrearse hasta evidencia pública o aportada legalmente por el usuario.
 
-Este repositorio contiene únicamente la **Fase 0**: el entorno técnico ejecutable. Todavía no
-incluye investigaciones, usuarios, conectores, extracción de entidades, RAG ni llamadas a LLM.
+El repositorio contiene la **Fase 1**: el entorno técnico y el core domain persistente. Incluye
+investigaciones, entidades, relaciones, fuentes, documentos, evidence, findings y el esquema base
+de embeddings. Todavía no incluye usuarios, conectores, ejecución de investigación, RAG ni LLM.
 
 ## Arquitectura actual
 
@@ -21,8 +22,7 @@ compose.yaml     Stack local completo
 ```
 
 Docker Compose levanta cinco servicios: `frontend`, `backend`, `worker`, `postgres` y `redis`.
-PostgreSQL usa una imagen con pgvector disponible; la extensión y las tablas se crearán mediante
-migraciones en la Fase 1.
+PostgreSQL usa una imagen con pgvector. Alembic habilita la extensión y crea el modelo de dominio.
 
 ## Requisitos
 
@@ -34,6 +34,7 @@ migraciones en la Fase 1.
 ```bash
 cp .env.example .env
 docker compose up --build --wait
+docker compose exec backend alembic upgrade head
 ```
 
 Servicios disponibles:
@@ -43,6 +44,7 @@ Servicios disponibles:
 - OpenAPI: <http://localhost:8000/docs>
 - Liveness: <http://localhost:8000/api/health/live>
 - Readiness: <http://localhost:8000/api/health/ready>
+- Investigations: <http://localhost:8000/api/investigations>
 
 Para ver logs o detener el entorno:
 
@@ -109,7 +111,8 @@ ruff check .
 ruff format --check .
 mypy
 pytest
-alembic current
+alembic upgrade head
+alembic check
 ```
 
 Frontend:
@@ -140,13 +143,13 @@ GitHub Actions ejecuta estos checks y un smoke test del stack. No realiza deploy
 - `docker compose logs backend worker postgres redis` reúne los logs relevantes del backend.
 - Si cambian dependencias, reconstruí con `docker compose build --no-cache`.
 
-## Limitaciones actuales
+## Core Domain y limitaciones
 
-- No existe modelo de dominio ni autenticación.
-- Alembic está configurado, pero no hay migraciones de negocio.
+- El modelo y sus decisiones están documentados en [docs/data-model.md](docs/data-model.md).
+- No existe autenticación ni asociación de registros a usuarios.
 - Celery arranca sin tareas registradas.
-- pgvector está disponible en PostgreSQL, pero todavía no se crea ni utiliza la extensión.
-- No hay conectores, procesamiento documental, IA, RAG, grafo ni workflows E2E.
+- pgvector y `embedding_records` están preparados, pero no hay generación ni búsqueda vectorial.
+- No hay conectores, procesamiento documental, IA, RAG ni workflows E2E.
 
 Consultá [la arquitectura](docs/architecture.md) para los límites definidos para las próximas
 fases.

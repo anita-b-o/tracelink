@@ -2,9 +2,9 @@
 
 ## Estado actual
 
-La Fase 0 establece un monorepo Docker-first y un backend desplegable como monolito modular. No
-implementa aún el dominio OSINT: su objetivo es verificar que el frontend, el API, el worker y los
-almacenes de datos puedan desarrollarse y probarse juntos.
+La Fase 1 conserva el monorepo Docker-first y el backend como monolito modular, e incorpora el
+modelo persistente central. El frontend sigue limitado al estado de servicios y Celery no ejecuta
+tareas de dominio.
 
 ```text
 Navegador
@@ -21,8 +21,8 @@ Navegador
 
 - **Frontend:** presentación y estado de interacción. No contiene reglas de investigación.
 - **API:** contratos HTTP, validación de entrada y composición de casos de uso.
-- **Dominio:** reglas y estados de investigación; se incorporará en la Fase 1 sin depender de
-  FastAPI, Celery ni proveedores externos.
+- **Dominio:** reglas, enums, normalización y grafo persistente sin depender de FastAPI, Celery ni
+  proveedores externos. El detalle está en [data-model.md](data-model.md).
 - **Persistencia:** SQLAlchemy, PostgreSQL, Redis y migraciones Alembic.
 - **Research connectors:** adaptadores de fuentes públicas detrás de una interfaz común; se
   incorporarán en la Fase 3.
@@ -50,7 +50,6 @@ JSON y no incluyen configuración ni secretos.
 
 ## Decisiones diferidas
 
-El modelo de datos, permisos, contratos de investigación, connectors, estrategia RAG y entity
-resolution se definirán en sus milestones. Se evita anticiparlos con abstracciones vacías. Los
-documentos específicos de esos componentes se crearán cuando exista una implementación que
-documentar.
+Permisos, workflows ejecutables, connectors, estrategia RAG y entity resolution continúan
+diferidos. El esquema vectorial no fija dimensión ni índice hasta seleccionar el modelo de
+embeddings en su milestone correspondiente.

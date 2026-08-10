@@ -4,7 +4,10 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from tracelink.core.config import get_settings
+from tracelink.domain import models as domain_models
 from tracelink.infrastructure.database import metadata
+
+_ = domain_models
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
@@ -33,7 +36,11 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+        )
         with context.begin_transaction():
             context.run_migrations()
 

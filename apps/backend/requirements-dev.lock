@@ -81,6 +81,8 @@ packaging==26.3
     #   wheel
 pathspec==1.1.1
     # via mypy
+pgvector==0.5.0
+    # via tracelink-backend (pyproject.toml)
 pip-tools==7.6.0
     # via tracelink-backend (pyproject.toml)
 pluggy==1.6.0

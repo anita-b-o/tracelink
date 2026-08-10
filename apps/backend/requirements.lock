@@ -51,6 +51,8 @@ markupsafe==3.0.3
     # via mako
 packaging==26.3
     # via kombu
+pgvector==0.5.0
+    # via tracelink-backend (pyproject.toml)
 prompt-toolkit==3.0.53
     # via click-repl
 psycopg==3.3.4

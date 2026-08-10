@@ -11,6 +11,7 @@ dependencies = [
   "alembic>=1.18,<2",
   "celery[redis]>=5.6,<6",
   "fastapi>=0.141,<1",
+  "pgvector>=0.4,<1",
   "psycopg[binary]>=3.3,<4",
   "pydantic-settings>=2.12,<3",
   "redis>=6.4,<6.5",
@@ -38,6 +39,7 @@ tracelink = ["py.typed"]
 addopts = "-q --strict-markers"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = ["integration: requires a real PostgreSQL server with pgvector"]
 
 [tool.ruff]
 target-version = "py312"

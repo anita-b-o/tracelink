@@ -24,7 +24,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
-    description="Evidence-first OSINT research API. Phase 0 bootstrap.",
+    description="Evidence-first OSINT research API. Phase 1 core domain.",
     docs_url="/docs",
     openapi_url="/openapi.json",
     lifespan=lifespan,
