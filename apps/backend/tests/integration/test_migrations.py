@@ -11,7 +11,9 @@ pytestmark = pytest.mark.integration
 @pytest.mark.asyncio
 async def test_migration_round_trip(migrated_database_url: str) -> None:
     _ = migrated_database_url
-    command.downgrade(alembic_config(), "base")
+    command.downgrade(alembic_config(), "0001_core_domain")
+    command.upgrade(alembic_config(), "head")
+    command.downgrade(alembic_config(), "0001_core_domain")
     command.upgrade(alembic_config(), "head")
 
     async with get_engine().connect() as connection:

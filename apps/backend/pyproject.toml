@@ -39,7 +39,10 @@ tracelink = ["py.typed"]
 addopts = "-q --strict-markers"
 testpaths = ["tests"]
 pythonpath = ["src"]
-markers = ["integration: requires a real PostgreSQL server with pgvector"]
+markers = [
+  "integration: requires a real PostgreSQL server with pgvector",
+  "celery_smoke: requires a real Redis broker and Celery worker process",
+]
 
 [tool.ruff]
 target-version = "py312"

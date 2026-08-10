@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -29,6 +30,14 @@ class InvestigationRepository:
     async def get_by_id(self, investigation_id: UUID) -> Investigation | None:
         return await self.session.get(Investigation, investigation_id)
 
+    async def get_by_id_for_update(self, investigation_id: UUID) -> Investigation | None:
+        return cast(
+            Investigation | None,
+            await self.session.scalar(
+                select(Investigation).where(Investigation.id == investigation_id).with_for_update()
+            ),
+        )
+
     async def list(self, *, limit: int = 50, offset: int = 0) -> list[Investigation]:
         result = await self.session.scalars(
             select(Investigation)
@@ -44,7 +53,6 @@ class InvestigationRepository:
         *,
         title: str | None = None,
         original_query: str | None = None,
-        status: InvestigationStatus | None = None,
     ) -> Investigation:
         if title is not None:
             investigation.title = require_non_empty(clean_text(title), "title")
@@ -52,8 +60,6 @@ class InvestigationRepository:
             investigation.original_query = require_non_empty(
                 original_query.strip(), "original_query"
             )
-        if status is not None:
-            investigation.status = status
         await self.session.flush()
         await self.session.refresh(investigation)
         return investigation

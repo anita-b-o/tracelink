@@ -4,9 +4,9 @@ TraceLink será un sistema web de investigación OSINT asistida por IA para due 
 empresas y personas. Su principio central es que cada entidad, relación y conclusión debe poder
 rastrearse hasta evidencia pública o aportada legalmente por el usuario.
 
-El repositorio contiene la **Fase 1**: el entorno técnico y el core domain persistente. Incluye
-investigaciones, entidades, relaciones, fuentes, documentos, evidence, findings y el esquema base
-de embeddings. Todavía no incluye usuarios, conectores, ejecución de investigación, RAG ni LLM.
+El repositorio contiene la **Fase 2**: el core domain persistente y un workflow asíncrono de
+investigación ejecutado por Celery con research deliberadamente simulado. Todavía no incluye
+usuarios, conectores reales, scraping, extracción, RAG ni LLM.
 
 ## Arquitectura actual
 
@@ -96,6 +96,9 @@ Los valores predeterminados del backend apuntan a los puertos locales de Postgre
 | `NEXT_PUBLIC_API_URL` | URL del API visible para el navegador | `http://localhost:8000` |
 | `CORS_ORIGINS` | Orígenes permitidos, separados por coma | `http://localhost:3000` |
 | `LOG_LEVEL` | Nivel de logging del backend y worker | `INFO` |
+| `RESEARCH_TASK_MAX_ATTEMPTS` | Máximo de ejecuciones de dominio por task | `3` |
+| `FAKE_RESEARCH_DELAY_MS` | Delay base del executor simulado | `25` |
+| `CELERY_TRANSPORT_MAX_RETRIES` | Retries acotados ante fallos de infraestructura | `3` |
 
 `DATABASE_URL`, `REDIS_URL`, `CELERY_BROKER_URL` y `CELERY_RESULT_BACKEND` se configuran
 directamente para los contenedores. Se pueden definir explícitamente al ejecutar el backend de
@@ -143,13 +146,15 @@ GitHub Actions ejecuta estos checks y un smoke test del stack. No realiza deploy
 - `docker compose logs backend worker postgres redis` reúne los logs relevantes del backend.
 - Si cambian dependencias, reconstruí con `docker compose build --no-cache`.
 
-## Core Domain y limitaciones
+## Workflow y limitaciones
 
 - El modelo y sus decisiones están documentados en [docs/data-model.md](docs/data-model.md).
+- El workflow está documentado en
+  [docs/investigation-workflow.md](docs/investigation-workflow.md).
 - No existe autenticación ni asociación de registros a usuarios.
-- Celery arranca sin tareas registradas.
+- Celery ejecuta únicamente Fake Research; PostgreSQL conserva estado, progreso y resultados.
 - pgvector y `embedding_records` están preparados, pero no hay generación ni búsqueda vectorial.
-- No hay conectores, procesamiento documental, IA, RAG ni workflows E2E.
+- No hay conectores, procesamiento documental, IA, RAG ni datos falsos en el grafo.
 
 Consultá [la arquitectura](docs/architecture.md) para los límites definidos para las próximas
 fases.

@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import computed_field
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
+    celery_transport_max_retries: int = Field(default=3, ge=0)
+
+    research_task_max_attempts: int = Field(default=3, ge=1)
+    fake_research_delay_ms: int = Field(default=25, ge=0, le=60_000)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

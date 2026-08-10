@@ -2,9 +2,9 @@
 
 ## Estado actual
 
-La Fase 1 conserva el monorepo Docker-first y el backend como monolito modular, e incorpora el
-modelo persistente central. El frontend sigue limitado al estado de servicios y Celery no ejecuta
-tareas de dominio.
+La Fase 2 conserva el monorepo Docker-first y el backend como monolito modular. El core domain
+persistente ahora incluye un workflow de Investigation ejecutable con tareas de research
+simuladas. El frontend sigue limitado al estado de servicios.
 
 ```text
 Navegador
@@ -13,8 +13,8 @@ Navegador
    │      └── consulta de disponibilidad
    │
    └── FastAPI :8000
-          ├── PostgreSQL 17 + pgvector
-          └── Redis 7 ── Celery worker
+          ├── PostgreSQL 17 + pgvector (estado y resultados)
+          └── Redis 7 ── Celery worker ── FakeResearchExecutor
 ```
 
 ## Límites del sistema
@@ -28,8 +28,8 @@ Navegador
   incorporarán en la Fase 3.
 - **Document processing y AI:** extracción, resolución, embeddings y generación grounded; se
   incorporarán sólo cuando sus etapas sean ejecutables y auditables.
-- **Jobs:** Celery actúa como límite asíncrono. En esta fase existe únicamente la aplicación y su
-  worker, sin tareas de negocio.
+- **Jobs:** Celery actúa como límite asíncrono y ejecuta ResearchTasks simuladas. El lifecycle async
+  de SQLAlchemy se concentra en un runner por proceso worker.
 
 El backend seguirá siendo un único artefacto desplegable. Los módulos se separarán por
 responsabilidad y no como microservicios. PostgreSQL será la fuente de verdad; Redis se limita a
@@ -45,11 +45,14 @@ distinguen proceso vivo de dependencias listas:
 - `/api/health/ready` verifica PostgreSQL y Redis y devuelve el estado de cada componente.
 - El worker responde a un `inspect ping` dirigido a su hostname.
 
-La configuración entra por variables de entorno validadas con Pydantic. Los logs del backend son
-JSON y no incluyen configuración ni secretos.
+La configuración entra por variables de entorno validadas con Pydantic. Los logs del backend y el
+worker son JSON, incorporan IDs de correlación y no incluyen la consulta original ni secretos.
 
 ## Decisiones diferidas
 
-Permisos, workflows ejecutables, connectors, estrategia RAG y entity resolution continúan
-diferidos. El esquema vectorial no fija dimensión ni índice hasta seleccionar el modelo de
-embeddings en su milestone correspondiente.
+Permisos, connectors reales, estrategia RAG y entity resolution continúan diferidos. El executor
+de Fase 2 sólo produce resultados simulados y no crea datos del grafo. El esquema vectorial no fija
+dimensión ni índice hasta seleccionar el modelo de embeddings en su milestone correspondiente.
+
+El detalle del workflow, sus locks y sus políticas está en
+[investigation-workflow.md](investigation-workflow.md).

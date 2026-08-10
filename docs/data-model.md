@@ -2,9 +2,9 @@
 
 ## Alcance
 
-La Fase 1 define el núcleo persistente y auditable. El grafo de entidades, fuentes y documentos es
-compartido entre investigaciones; evidence y findings pertenecen a una investigación. Todavía no
-existen autenticación, ejecución de research tasks, conectores, extracción automática ni RAG.
+El núcleo persistente y auditable incluye el workflow simulado de Fase 2. El grafo de entidades,
+fuentes y documentos es compartido entre investigaciones; evidence y findings pertenecen a una
+investigación. Todavía no existen autenticación, conectores, extracción automática ni RAG.
 
 Todos los identificadores son UUID generados por la aplicación. Los timestamps usan zona horaria y
 los objetos extensibles se almacenan en JSONB. Los campos `metadata` aparecen como `metadata_` en
@@ -15,7 +15,7 @@ los modelos SQLAlchemy porque `metadata` está reservado por la API declarativa.
 | Tabla | Propósito | Reglas principales |
 | --- | --- | --- |
 | `investigations` | Caso de investigación y consulta original | título y consulta no vacíos; inicia en `DRAFT` |
-| `research_tasks` | Plan futuro de trabajo dentro de un caso | attempts no negativo; fechas ordenadas; no ejecuta tareas aún |
+| `research_tasks` | Plan ejecutable simulado dentro de un caso | tipo único por investigación; attempts no negativo; fechas ordenadas; resultado JSON y último error |
 | `entities` | Nodo canónico del grafo | nombre canónico y forma normalizada; nombres iguales no implican identidad |
 | `entity_aliases` | Nombre alternativo de una entidad | único por entidad y alias normalizado; no repite el nombre canónico |
 | `relationships` | Arista dirigida entre entidades | sin self-reference; confidence 0..1; única por origen, destino y tipo |
@@ -39,8 +39,9 @@ existencia individual de ambos registros.
 - Assertion status para relationships y findings: `CONFIRMED`, `PROBABLE`, `POSSIBLE`,
   `UNVERIFIED`, `CONTRADICTED`.
 
-`ResearchTask.type`, `ResearchTask.source_type` y `Source.type` son strings controlados por el
-llamador. Se difiere una taxonomía cerrada hasta que existan workflows y connectors reales.
+`ResearchTask.type` usa la taxonomía cerrada `IDENTIFY_ENTITY`, `WEB_SEARCH`, `DOMAIN_LOOKUP` y
+`PUBLIC_MENTIONS`. `ResearchTask.source_type` continúa nullable; `Source.type` sigue siendo string
+hasta incorporar connectors reales.
 
 ## Normalización y deduplicación
 
@@ -73,6 +74,7 @@ Fase 1 no expone operaciones de borrado.
 ## Índices principales
 
 - estados de investigations, tasks, relationships y findings;
+- `(research_task.investigation_id, research_task.type)` único para idempotencia del planner;
 - `(entity.type, entity.normalized_name)`, normalized name y normalized aliases;
 - ambos extremos de relationships y el par origen/destino;
 - `sources.url_hash`, type y retrieved_at;

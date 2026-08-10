@@ -107,7 +107,25 @@ jobs:
           curl --fail --silent --show-error \
             --header 'Content-Type: application/json' \
             --data '{"title":"CI smoke","original_query":"Verify core domain"}' \
-            http://localhost:8000/api/investigations > /dev/null
+            http://localhost:8000/api/investigations > /tmp/investigation.json
+          investigation_id=$(python -c \
+            'import json; print(json.load(open("/tmp/investigation.json"))["id"])')
+          curl --fail --silent --show-error --request POST \
+            "http://localhost:8000/api/investigations/${investigation_id}/start" > /dev/null
+          for attempt in $(seq 1 30); do
+            curl --fail --silent --show-error \
+              "http://localhost:8000/api/investigations/${investigation_id}/progress" \
+              > /tmp/progress.json
+            percent=$(python -c \
+              'import json; print(json.load(open("/tmp/progress.json"))["percent"])')
+            if [ "$percent" = "100" ]; then break; fi
+            sleep 1
+          done
+          test "$percent" = "100"
+          status=$(curl --fail --silent --show-error \
+            "http://localhost:8000/api/investigations/${investigation_id}" | \
+            python -c 'import json,sys; print(json.load(sys.stdin)["status"])')
+          test "$status" = "COMPLETED"
           curl --fail --silent --show-error http://localhost:8000/api/investigations > /dev/null
       - name: Show logs on failure
         if: failure()

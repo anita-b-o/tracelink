@@ -16,6 +16,16 @@ class JsonFormatter(logging.Formatter):
         }
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
+        for field in (
+            "investigation_id",
+            "research_task_id",
+            "celery_task_id",
+            "task_type",
+            "status",
+        ):
+            value = getattr(record, field, None)
+            if value is not None:
+                payload[field] = value
         return json.dumps(payload, ensure_ascii=False)
 
 

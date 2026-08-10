@@ -28,6 +28,7 @@ from tracelink.domain.enums import (
     InvestigationStatus,
     RelationshipType,
     ResearchTaskStatus,
+    ResearchTaskType,
 )
 from tracelink.infrastructure.database import Base
 
@@ -88,12 +89,15 @@ class ResearchTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "started_at IS NULL OR completed_at IS NULL OR completed_at >= started_at",
             name="task_dates_ordered",
         ),
+        UniqueConstraint("investigation_id", "type", name="uq_research_task_plan_item"),
     )
 
     investigation_id: Mapped[UUID] = mapped_column(
         ForeignKey("investigations.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    type: Mapped[str] = mapped_column(String(100), nullable=False)
+    type: Mapped[ResearchTaskType] = mapped_column(
+        enum_type(ResearchTaskType, "research_task_type"), nullable=False
+    )
     status: Mapped[ResearchTaskStatus] = mapped_column(
         enum_type(ResearchTaskStatus, "research_task_status"),
         default=ResearchTaskStatus.PENDING,
@@ -105,6 +109,10 @@ class ResearchTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result: Mapped[JsonObject | None] = mapped_column(JSONB)
+    last_error_code: Mapped[str | None] = mapped_column(String(100))
+    last_error_message: Mapped[str | None] = mapped_column(Text)
+    active_celery_task_id: Mapped[str | None] = mapped_column(String(255))
 
     investigation: Mapped[Investigation] = relationship(back_populates="tasks")
 

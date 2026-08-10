@@ -19,6 +19,20 @@ class ResearchTaskStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class ResearchTaskType(StrEnum):
+    IDENTIFY_ENTITY = "IDENTIFY_ENTITY"
+    WEB_SEARCH = "WEB_SEARCH"
+    DOMAIN_LOOKUP = "DOMAIN_LOOKUP"
+    PUBLIC_MENTIONS = "PUBLIC_MENTIONS"
+
+
+class FakeResearchMode(StrEnum):
+    SUCCESS = "SUCCESS"
+    FAIL_ONCE = "FAIL_ONCE"
+    ALWAYS_FAIL = "ALWAYS_FAIL"
+    SLOW = "SLOW"
+
+
 class EntityType(StrEnum):
     PERSON = "PERSON"
     COMPANY = "COMPANY"

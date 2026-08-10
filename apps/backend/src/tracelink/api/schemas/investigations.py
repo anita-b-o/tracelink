@@ -26,3 +26,15 @@ class InvestigationRead(BaseModel):
     status: InvestigationStatus
     created_at: datetime
     updated_at: datetime
+
+
+class InvestigationProgressRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    total: int
+    pending: int
+    running: int
+    completed: int
+    failed: int
+    cancelled: int
+    percent: int

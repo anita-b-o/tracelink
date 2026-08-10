@@ -39,6 +39,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CELERY_TRANSPORT_MAX_RETRIES: ${CELERY_TRANSPORT_MAX_RETRIES:-3}
+      RESEARCH_TASK_MAX_ATTEMPTS: ${RESEARCH_TASK_MAX_ATTEMPTS:-3}
+      FAKE_RESEARCH_DELAY_MS: ${FAKE_RESEARCH_DELAY_MS:-25}
     user: tracelink
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -84,6 +87,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CELERY_TRANSPORT_MAX_RETRIES: ${CELERY_TRANSPORT_MAX_RETRIES:-3}
+      RESEARCH_TASK_MAX_ATTEMPTS: ${RESEARCH_TASK_MAX_ATTEMPTS:-3}
+      FAKE_RESEARCH_DELAY_MS: ${FAKE_RESEARCH_DELAY_MS:-25}
     user: tracelink
     volumes:
       - ./apps/backend:/app
