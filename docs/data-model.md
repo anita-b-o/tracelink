@@ -2,9 +2,9 @@
 
 ## Alcance
 
-El núcleo persistente y auditable incluye connectors y entity extraction/resolution de Fase 4. El
+El núcleo persistente y auditable incluye connectors, entities y relaciones derivadas de Fase 5. El
 grafo de entidades, fuentes y documentos es compartido; associations, mentions, evidence y findings
-pertenecen a una investigación. Todavía no existen autenticación, relationships derivadas ni RAG.
+pertenecen a una investigación. Todavía no existen autenticación, RAG ni Findings automáticos.
 
 Todos los identificadores son UUID generados por la aplicación. Los timestamps usan zona horaria y
 los objetos extensibles se almacenan en JSONB. Los campos `metadata` aparecen como `metadata_` en
@@ -21,10 +21,11 @@ los modelos SQLAlchemy porque `metadata` está reservado por la API declarativa.
 | `investigation_artifacts` | Source y Document usados por un caso | triple Investigation/Source/Document único, incluido NULL |
 | `entity_mentions` | Aparición extraída antes o después de resolver | fingerprint único por Investigation/Document; confidence y offsets válidos |
 | `entity_resolution_candidates` | Match explicable y revisable | único por mention/candidate; score 0..1 y status controlado |
-| `relationships` | Arista dirigida entre entidades | sin self-reference; confidence 0..1; única por origen, destino y tipo |
+| `relationship_candidates` | Claim extraído antes de validar | fingerprint por Investigation/Document; score, método, span y decisión explicables |
+| `relationships` | Arista validada entre entidades | sin self-reference; confidence 0..1; única por extremos canonicalizados y tipo |
 | `sources` | Identidad estable de una URL pública | URL normalizada y SHA-256 indexados; writes serializados por advisory lock |
 | `documents` | Contenido textual recuperado | SHA-256 de UTF-8; único por source y hash |
-| `evidence` | Evidencia que respalda un nodo o una relación | requiere entity o relationship; confidence 0..1 |
+| `evidence` | Evidencia que respalda un nodo o una relación | Source/Document/Artifact coherentes; offsets y fingerprint deduplicable |
 | `findings` | Conclusión de una investigación | confidence y relevance opcional 0..1 |
 | `embedding_records` | Reserva de esquema para chunks vectoriales | vector sin dimensión fija; chunk único por documento; sin búsqueda ni índice ANN |
 
@@ -52,8 +53,9 @@ Los nombres conservan canonical/normalized y agregan `comparison_key` por tipo. 
 ORGANIZATION equivalen designadores legales sólo en esa clave; DOMAIN aplica IDNA; ADDRESS y PERSON
 son conservadores. Candidate generation usa exact/alias y trigram indexado, sin vector search.
 
-Los aliases se deduplican por `(entity_id, normalized_alias)`. Las relationships se deduplican como
-aristas dirigidas por `(source_entity_id, target_entity_id, type)`. La URL normalizada descarta
+Los aliases se deduplican por `(entity_id, normalized_alias)`. Las relationships se deduplican por
+`(source_entity_id, target_entity_id, type)` y los tipos simétricos ordenan UUID antes del write.
+Candidates y Evidence usan fingerprints SHA-256 estables. La URL normalizada descarta
 fragmentos, puertos default y casing del host sin reordenar query ni cambiar trailing slashes no
 raíz. Los nuevos fetches reutilizan la Source bajo advisory lock; filas legacy no se eliminan. El
 contenido se deduplica por `(source_id, content_hash)` sin perder procedencia entre URLs.

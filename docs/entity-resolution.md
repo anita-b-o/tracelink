@@ -49,3 +49,7 @@ La cadena auditable es `Investigation -> InvestigationArtifact -> Source -> Docu
 Evidence general. El lock de documento evita reprocesamiento concurrente y otro advisory lock por
 tipo/comparison key serializa creación/resolución global; homónimos PERSON sin contexto siguen siendo
 entidades distintas por diseño.
+
+Relationship extraction consume únicamente mentions que ya tienen `entity_id`. La confidence de
+esas mentions participa como señal de endpoints sin modificar decisiones previas ni relajar el gate
+de PERSON.

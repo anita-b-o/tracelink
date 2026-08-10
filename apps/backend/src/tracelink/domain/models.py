@@ -27,7 +27,10 @@ from tracelink.domain.enums import (
     AssertionStatus,
     EntityResolutionCandidateStatus,
     EntityType,
+    EvidenceType,
     InvestigationStatus,
+    RelationshipCandidateStatus,
+    RelationshipClaimKind,
     RelationshipType,
     ResearchTaskStatus,
     ResearchTaskType,
@@ -85,6 +88,9 @@ class Investigation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="investigation", cascade="all, delete-orphan", passive_deletes=True
     )
     entity_mentions: Mapped[list[EntityMention]] = relationship(
+        back_populates="investigation", cascade="all, delete-orphan", passive_deletes=True
+    )
+    relationship_candidates: Mapped[list[RelationshipCandidate]] = relationship(
         back_populates="investigation", cascade="all, delete-orphan", passive_deletes=True
     )
 
@@ -186,6 +192,18 @@ class Relationship(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "OR last_observed_at >= first_observed_at",
             name="observation_dates_ordered",
         ),
+        CheckConstraint(
+            "type NOT IN ('RELATED_TO', 'PARTNER_OF', 'SHARES_ADDRESS_WITH') "
+            "OR source_entity_id < target_entity_id",
+            name="symmetric_endpoints_canonical",
+        ),
+        CheckConstraint(
+            "(temporal_start IS NULL OR temporal_start ~ "
+            "'^[0-9]{4}(-[0-9]{2}(-[0-9]{2})?)?$') AND "
+            "(temporal_end IS NULL OR temporal_end ~ "
+            "'^[0-9]{4}(-[0-9]{2}(-[0-9]{2})?)?$')",
+            name="temporal_values_iso_partial",
+        ),
         UniqueConstraint(
             "source_entity_id",
             "target_entity_id",
@@ -210,9 +228,14 @@ class Relationship(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     first_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    temporal_start: Mapped[str | None] = mapped_column(String(10))
+    temporal_end: Mapped[str | None] = mapped_column(String(10))
     metadata_: Mapped[JsonObject] = mapped_column(
         "metadata", JSONB, default=dict, server_default="{}", nullable=False
     )
+    source_entity: Mapped[Entity] = relationship(foreign_keys=[source_entity_id])
+    target_entity: Mapped[Entity] = relationship(foreign_keys=[target_entity_id])
+    evidence: Mapped[list[Evidence]] = relationship(back_populates="relationship")
 
 
 class Source(UUIDPrimaryKeyMixin, Base):
@@ -391,6 +414,83 @@ class EntityResolutionCandidate(UUIDPrimaryKeyMixin, Base):
     candidate_entity: Mapped[Entity] = relationship()
 
 
+class RelationshipCandidate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "relationship_candidates"
+    __table_args__ = (
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
+        CheckConstraint("score >= 0 AND score <= 1", name="score_range"),
+        CheckConstraint(
+            "(start_offset IS NULL AND end_offset IS NULL) OR "
+            "(start_offset >= 0 AND end_offset > start_offset)",
+            name="offsets_valid",
+        ),
+        CheckConstraint(
+            "(temporal_start IS NULL OR temporal_start ~ "
+            "'^[0-9]{4}(-[0-9]{2}(-[0-9]{2})?)?$') AND "
+            "(temporal_end IS NULL OR temporal_end ~ "
+            "'^[0-9]{4}(-[0-9]{2}(-[0-9]{2})?)?$')",
+            name="temporal_values_iso_partial",
+        ),
+        UniqueConstraint(
+            "investigation_id",
+            "document_id",
+            "fingerprint",
+            name="uq_relationship_candidate_fingerprint",
+        ),
+        Index(
+            "ix_relationship_candidates_identity",
+            "investigation_id",
+            "source_entity_id",
+            "target_entity_id",
+            "type",
+        ),
+    )
+
+    investigation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("investigations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    source_entity_id: Mapped[UUID] = mapped_column(
+        ForeignKey("entities.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    target_entity_id: Mapped[UUID] = mapped_column(
+        ForeignKey("entities.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    type: Mapped[RelationshipType] = mapped_column(
+        enum_type(RelationshipType, "relationship_type"), nullable=False
+    )
+    claim_kind: Mapped[RelationshipClaimKind] = mapped_column(
+        enum_type(RelationshipClaimKind, "relationship_claim_kind"), nullable=False
+    )
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    extraction_method: Mapped[str] = mapped_column(String(100), nullable=False)
+    supporting_text: Mapped[str | None] = mapped_column(String(1000))
+    start_offset: Mapped[int | None] = mapped_column(Integer)
+    end_offset: Mapped[int | None] = mapped_column(Integer)
+    temporal_start: Mapped[str | None] = mapped_column(String(10))
+    temporal_end: Mapped[str | None] = mapped_column(String(10))
+    metadata_: Mapped[JsonObject] = mapped_column(
+        "metadata", JSONB, default=dict, server_default="{}", nullable=False
+    )
+    signals: Mapped[JsonObject] = mapped_column(
+        JSONB, default=dict, server_default="{}", nullable=False
+    )
+    status: Mapped[RelationshipCandidateStatus] = mapped_column(
+        enum_type(RelationshipCandidateStatus, "relationship_candidate_status"),
+        nullable=False,
+        index=True,
+    )
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    investigation: Mapped[Investigation] = relationship(back_populates="relationship_candidates")
+    document: Mapped[Document] = relationship()
+    source_entity: Mapped[Entity] = relationship(foreign_keys=[source_entity_id])
+    target_entity: Mapped[Entity] = relationship(foreign_keys=[target_entity_id])
+
+
 class Evidence(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "evidence"
     __table_args__ = (
@@ -398,6 +498,30 @@ class Evidence(UUIDPrimaryKeyMixin, Base):
             "entity_id IS NOT NULL OR relationship_id IS NOT NULL", name="target_required"
         ),
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
+        CheckConstraint(
+            "(start_offset IS NULL AND end_offset IS NULL) OR "
+            "(start_offset >= 0 AND end_offset > start_offset)",
+            name="offsets_valid",
+        ),
+        UniqueConstraint(
+            "investigation_id", "fingerprint", name="uq_evidence_investigation_fingerprint"
+        ),
+        ForeignKeyConstraint(
+            ["document_id", "source_id"],
+            ["documents.id", "documents.source_id"],
+            name="fk_evidence_document_source",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["investigation_id", "source_id", "document_id"],
+            [
+                "investigation_artifacts.investigation_id",
+                "investigation_artifacts.source_id",
+                "investigation_artifacts.document_id",
+            ],
+            name="fk_evidence_investigation_artifact",
+            ondelete="RESTRICT",
+        ),
     )
 
     investigation_id: Mapped[UUID] = mapped_column(
@@ -417,12 +541,24 @@ class Evidence(UUIDPrimaryKeyMixin, Base):
     )
     excerpt: Mapped[str | None] = mapped_column(Text)
     locator: Mapped[str | None] = mapped_column(String(500))
+    start_offset: Mapped[int | None] = mapped_column(Integer)
+    end_offset: Mapped[int | None] = mapped_column(Integer)
+    evidence_type: Mapped[EvidenceType] = mapped_column(
+        enum_type(EvidenceType, "evidence_type"), nullable=False
+    )
+    metadata_: Mapped[JsonObject] = mapped_column(
+        "metadata", JSONB, default=dict, server_default="{}", nullable=False
+    )
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
     investigation: Mapped[Investigation] = relationship(back_populates="evidence")
+    source: Mapped[Source] = relationship(foreign_keys=[source_id])
+    document: Mapped[Document | None] = relationship(foreign_keys=[document_id])
+    relationship: Mapped[Relationship | None] = relationship(back_populates="evidence")
 
 
 class Finding(UUIDPrimaryKeyMixin, TimestampMixin, Base):

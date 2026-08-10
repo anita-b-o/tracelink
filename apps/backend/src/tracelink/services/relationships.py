@@ -5,6 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tracelink.domain.enums import AssertionStatus, RelationshipType
 from tracelink.domain.models import Entity, JsonObject, Relationship
+from tracelink.domain.relationship_extraction import (
+    canonicalize_relationship_endpoints,
+    relationship_types_compatible,
+    validate_partial_date,
+)
 from tracelink.domain.validation import (
     validate_chronology,
     validate_confidence,
@@ -29,8 +34,13 @@ class RelationshipService:
         status: AssertionStatus,
         first_observed_at: datetime | None = None,
         last_observed_at: datetime | None = None,
+        temporal_start: str | None = None,
+        temporal_end: str | None = None,
         metadata: JsonObject | None = None,
     ) -> Relationship:
+        source_entity_id, target_entity_id = canonicalize_relationship_endpoints(
+            source_entity_id, target_entity_id, relationship_type
+        )
         validate_relationship_endpoints(source_entity_id, target_entity_id)
         validate_confidence(confidence)
         validate_chronology(
@@ -39,10 +49,18 @@ class RelationshipService:
             "first_observed_at",
             "last_observed_at",
         )
-        if await self.session.get(Entity, source_entity_id) is None:
+        validate_partial_date(temporal_start)
+        validate_partial_date(temporal_end)
+        source_entity = await self.session.get(Entity, source_entity_id)
+        if source_entity is None:
             raise DomainNotFoundError("source entity not found")
-        if await self.session.get(Entity, target_entity_id) is None:
+        target_entity = await self.session.get(Entity, target_entity_id)
+        if target_entity is None:
             raise DomainNotFoundError("target entity not found")
+        if not relationship_types_compatible(
+            relationship_type, source_entity.type, target_entity.type
+        ):
+            raise ValueError("relationship endpoint types are incompatible")
         existing = await self.repository.get_by_identity(
             source_entity_id, target_entity_id, relationship_type
         )
@@ -56,5 +74,7 @@ class RelationshipService:
             status=status,
             first_observed_at=first_observed_at,
             last_observed_at=last_observed_at,
+            temporal_start=temporal_start,
+            temporal_end=temporal_end,
             metadata=metadata,
         )

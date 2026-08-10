@@ -31,6 +31,7 @@ class FakeResearchMode(StrEnum):
     FAIL_ONCE = "FAIL_ONCE"
     ALWAYS_FAIL = "ALWAYS_FAIL"
     SLOW = "SLOW"
+    PIPELINE_SUCCESS = "PIPELINE_SUCCESS"
 
 
 class EntityType(StrEnum):
@@ -65,6 +66,33 @@ class RelationshipType(StrEnum):
     MENTIONED_IN = "MENTIONED_IN"
     SUBSIDIARY_OF = "SUBSIDIARY_OF"
     PARTNER_OF = "PARTNER_OF"
+
+
+class RelationshipClaimKind(StrEnum):
+    AFFIRMS = "AFFIRMS"
+    NEGATES = "NEGATES"
+    ENDS = "ENDS"
+
+
+class RelationshipCandidateStatus(StrEnum):
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+    AUTO_ACCEPTED = "AUTO_ACCEPTED"
+    CONTRADICTED = "CONTRADICTED"
+
+
+class RelationshipDecisionType(StrEnum):
+    AUTO_ACCEPT = "AUTO_ACCEPT"
+    POSSIBLE = "POSSIBLE"
+    REJECT = "REJECT"
+    CONTRADICT = "CONTRADICT"
+
+
+class EvidenceType(StrEnum):
+    SUPPORTING = "SUPPORTING"
+    CONTRADICTING = "CONTRADICTING"
+    TEMPORAL_UPDATE = "TEMPORAL_UPDATE"
 
 
 class AssertionStatus(StrEnum):

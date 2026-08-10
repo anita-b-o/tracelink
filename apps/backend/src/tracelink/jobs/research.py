@@ -4,10 +4,11 @@ from typing import Any
 from uuid import UUID
 
 from celery import Task
+from kombu.exceptions import OperationalError as KombuOperationalError
 from sqlalchemy.exc import OperationalError
 
 from tracelink.connectors.errors import ConnectorError
-from tracelink.connectors.models import ResearchTaskResult
+from tracelink.connectors.models import ConnectorOutput, ResearchTaskResult
 from tracelink.connectors.registry import ConnectorRegistry, get_connector_registry
 from tracelink.core.config import get_settings
 from tracelink.domain.enums import FakeResearchMode
@@ -30,6 +31,7 @@ async def execute_research_task_async(
     celery_task_id: str,
     mode: FakeResearchMode | None,
     registry: ConnectorRegistry | None = None,
+    downstream_queue: str | None = None,
 ) -> None:
     settings = get_settings()
     session_factory = get_session_factory()
@@ -67,10 +69,15 @@ async def execute_research_task_async(
         connector_name = connectors[0].name if connectors else "fake_research"
     try:
         if mode is not None:
-            result = await FakeResearchExecutor(settings.fake_research_delay_ms).execute(
+            fake_result = await FakeResearchExecutor(settings.fake_research_delay_ms).execute(
                 task, mode=mode, is_cancelled=is_cancelled
             )
-            output = None
+            if isinstance(fake_result, ConnectorOutput):
+                output = fake_result
+                result = None
+            else:
+                result = fake_result
+                output = None
         else:
             output = await ConnectorResearchExecutor(configured_registry).execute(
                 task, is_cancelled=is_cancelled
@@ -157,6 +164,7 @@ async def execute_research_task_async(
                 await asyncio.to_thread(
                     process_document_entities.apply_async,
                     args=[str(task.investigation_id), str(document_id)],
+                    **({"queue": downstream_queue} if downstream_queue else {}),
                 )
 
 
@@ -173,14 +181,17 @@ def execute_research_task(
     mode: str | None = None,
 ) -> None:
     try:
+        delivery_info = self.request.delivery_info or {}
+        routing_key = delivery_info.get("routing_key")
         async_worker_runtime.run(
             execute_research_task_async(
                 UUID(research_task_id),
                 str(self.request.id),
                 FakeResearchMode(mode) if mode is not None else None,
+                downstream_queue=str(routing_key) if routing_key else None,
             )
         )
-    except OperationalError as exc:
+    except (OperationalError, KombuOperationalError) as exc:
         settings = get_settings()
         raise self.retry(
             exc=exc,

@@ -20,6 +20,7 @@ from tracelink.repositories.documents import DocumentRepository
 from tracelink.repositories.entities import EntityRepository
 from tracelink.repositories.evidence import EvidenceRepository
 from tracelink.repositories.findings import FindingRepository
+from tracelink.repositories.investigation_artifacts import InvestigationArtifactRepository
 from tracelink.repositories.investigations import InvestigationRepository
 from tracelink.repositories.relationships import RelationshipRepository
 from tracelink.repositories.sources import SourceRepository
@@ -130,6 +131,11 @@ async def test_evidence_targets_and_document_source_coherence(db_session: AsyncS
     )
     document = await DocumentService(db_session, DocumentRepository(db_session)).create(
         source_id=source.id, mime_type="text/html", raw_text="Report"
+    )
+    await InvestigationArtifactRepository(db_session).associate(
+        investigation_id=investigation.id,
+        source_id=source.id,
+        document_id=document.id,
     )
     service = EvidenceService(db_session, EvidenceRepository(db_session))
 

@@ -19,6 +19,7 @@ TABLES = (
     "embedding_records",
     "findings",
     "evidence",
+    "relationship_candidates",
     "entity_resolution_candidates",
     "entity_mentions",
     "investigation_artifacts",

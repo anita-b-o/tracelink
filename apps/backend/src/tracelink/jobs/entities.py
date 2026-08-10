@@ -2,6 +2,7 @@ import logging
 from uuid import UUID
 
 from celery import Task
+from kombu.exceptions import OperationalError as KombuOperationalError
 from sqlalchemy.exc import OperationalError
 
 from tracelink.core.config import get_settings
@@ -14,7 +15,7 @@ from tracelink.services.document_entity_processing import DocumentEntityProcessi
 logger = logging.getLogger(__name__)
 
 
-async def process_document_entities_async(investigation_id: UUID, document_id: UUID) -> None:
+async def process_document_entities_async(investigation_id: UUID, document_id: UUID) -> bool:
     settings = get_settings()
     async with get_session_factory()() as session, session.begin():
         mentions = await DocumentEntityProcessingService(session, settings).process(
@@ -29,6 +30,7 @@ async def process_document_entities_async(investigation_id: UUID, document_id: U
             "mention_count": len(mentions),
         },
     )
+    return len({mention.entity_id for mention in mentions if mention.entity_id is not None}) >= 2
 
 
 @celery_app.task(  # type: ignore[untyped-decorator]
@@ -44,10 +46,19 @@ def process_document_entities(
     document_id: str,
 ) -> None:
     try:
-        async_worker_runtime.run(
+        should_process_relationships = async_worker_runtime.run(
             process_document_entities_async(UUID(investigation_id), UUID(document_id))
         )
-    except (OperationalError, EntityExtractionProviderError) as exc:
+        if should_process_relationships:
+            from tracelink.jobs.relationships import process_document_relationships
+
+            delivery_info = self.request.delivery_info or {}
+            routing_key = delivery_info.get("routing_key")
+            options = {"queue": routing_key} if routing_key else {}
+            process_document_relationships.apply_async(
+                args=[investigation_id, document_id], **options
+            )
+    except (OperationalError, KombuOperationalError, EntityExtractionProviderError) as exc:
         settings = get_settings()
         raise self.retry(
             exc=exc,

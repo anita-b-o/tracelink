@@ -11,6 +11,21 @@ pytestmark = pytest.mark.integration
 @pytest.mark.asyncio
 async def test_migration_round_trip(migrated_database_url: str) -> None:
     _ = migrated_database_url
+    command.downgrade(alembic_config(), "0004_entity_extraction")
+    async with get_engine().connect() as connection:
+        candidate_table = await connection.scalar(
+            text("SELECT to_regclass('public.relationship_candidates')")
+        )
+        evidence_fingerprint = await connection.scalar(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = 'evidence' "
+                "AND column_name = 'fingerprint'"
+            )
+        )
+    assert candidate_table is None
+    assert evidence_fingerprint is None
+    command.upgrade(alembic_config(), "head")
     command.downgrade(alembic_config(), "0003_research_connectors")
     async with get_engine().connect() as connection:
         mention_table = await connection.scalar(
@@ -60,6 +75,8 @@ async def test_migration_round_trip(migrated_database_url: str) -> None:
         "embedding_records",
         "entity_mentions",
         "entity_resolution_candidates",
+        "relationship_candidates",
         "investigation_artifacts",
     } <= tables
     assert "normalized_url" in source_columns
+    command.check(alembic_config())

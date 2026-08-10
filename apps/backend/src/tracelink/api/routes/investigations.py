@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tracelink.api.routes.relationships import relationship_read
 from tracelink.api.schemas.entities import (
     EntityMentionRead,
     EntityRead,
@@ -14,6 +15,11 @@ from tracelink.api.schemas.investigations import (
     InvestigationCreate,
     InvestigationProgressRead,
     InvestigationRead,
+)
+from tracelink.api.schemas.relationships import (
+    RelationshipCandidateRead,
+    RelationshipEntitySummary,
+    RelationshipRead,
 )
 from tracelink.api.schemas.research_tasks import ResearchTaskRead
 from tracelink.api.schemas.sources import UrlIngestionCreate
@@ -40,6 +46,8 @@ from tracelink.repositories.entity_mentions import (
     EntityResolutionCandidateRepository,
 )
 from tracelink.repositories.investigations import InvestigationRepository
+from tracelink.repositories.relationship_candidates import RelationshipCandidateRepository
+from tracelink.repositories.relationships import RelationshipRepository
 from tracelink.services.errors import DomainConflictError, DomainNotFoundError
 from tracelink.services.investigation_workflow import InvestigationWorkflowService
 from tracelink.services.research_artifacts import ResearchArtifactService
@@ -238,3 +246,54 @@ async def list_investigation_resolution_candidates(
     return await EntityResolutionCandidateRepository(session).list_by_investigation(
         investigation_id, limit=limit, offset=offset
     )
+
+
+@router.get("/{investigation_id}/relationships", response_model=list[RelationshipRead])
+async def list_investigation_relationships(
+    investigation_id: UUID,
+    session: Session,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[RelationshipRead]:
+    await _require_investigation(investigation_id, session)
+    items = await RelationshipRepository(session).list_by_investigation(
+        investigation_id, limit=limit, offset=offset
+    )
+    return [relationship_read(relationship, count) for relationship, count in items]
+
+
+@router.get(
+    "/{investigation_id}/relationship-candidates",
+    response_model=list[RelationshipCandidateRead],
+)
+async def list_investigation_relationship_candidates(
+    investigation_id: UUID,
+    session: Session,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[RelationshipCandidateRead]:
+    await _require_investigation(investigation_id, session)
+    items = await RelationshipCandidateRepository(session).list_by_investigation(
+        investigation_id, limit=limit, offset=offset
+    )
+    return [
+        RelationshipCandidateRead(
+            id=item.id,
+            investigation_id=item.investigation_id,
+            document_id=item.document_id,
+            source_entity=RelationshipEntitySummary.model_validate(item.source_entity),
+            target_entity=RelationshipEntitySummary.model_validate(item.target_entity),
+            type=item.type,
+            claim_kind=item.claim_kind,
+            confidence=item.confidence,
+            score=item.score,
+            status=item.status,
+            extraction_method=item.extraction_method,
+            signals=item.signals,
+            temporal_start=item.temporal_start,
+            temporal_end=item.temporal_end,
+            evidence_preview=item.supporting_text,
+            created_at=item.created_at,
+        )
+        for item in items
+    ]

@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     entity_extraction_chunk_overlap: int = Field(default=300, ge=0, le=10_000)
     entity_resolution_auto_match_threshold: float = Field(default=0.90, ge=0, le=1)
     entity_resolution_possible_match_threshold: float = Field(default=0.65, ge=0, le=1)
+    relationship_auto_accept_threshold: float = Field(default=0.90, ge=0, le=1)
+    relationship_possible_threshold: float = Field(default=0.65, ge=0, le=1)
+    relationship_max_candidates_per_document: int = Field(default=100, ge=1, le=1000)
 
     @model_validator(mode="after")
     def validate_entity_pipeline_settings(self) -> "Settings":
@@ -50,6 +53,10 @@ class Settings(BaseSettings):
             >= self.entity_resolution_auto_match_threshold
         ):
             raise ValueError("possible match threshold must be lower than auto match threshold")
+        if self.relationship_possible_threshold >= self.relationship_auto_accept_threshold:
+            raise ValueError(
+                "relationship possible threshold must be lower than auto accept threshold"
+            )
         return self
 
     @computed_field  # type: ignore[prop-decorator]

@@ -51,3 +51,6 @@ Investigation/Document serializa workers; un segundo procesamiento reutiliza las
 El job Celery usa late ack y retries acotados para fallos de base/provider. Una falla no cambia el estado
 de la Investigation ni persiste output parcial. Los logs contienen IDs, tipo, decisión, score y método,
 nunca documento, prompt o respuesta completa.
+
+En Fase 5, después del commit y sólo si existen dos entidades resueltas distintas, este job publica
+`process_document_relationships`. Ambos jobs son idempotentes y mantienen transacciones separadas.
