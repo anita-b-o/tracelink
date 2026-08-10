@@ -14,6 +14,7 @@ from tracelink.domain.models import (
     Evidence,
     Finding,
     Investigation,
+    RetrievalChunk,
     Source,
 )
 from tracelink.repositories.documents import DocumentRepository
@@ -215,12 +216,25 @@ async def test_document_deletion_cascades_to_derived_embeddings(db_session: Asyn
     document = await DocumentService(db_session, DocumentRepository(db_session)).create(
         source_id=source.id, mime_type="text/plain", raw_text="chunk"
     )
-    embedding = EmbeddingRecord(
+    chunk = RetrievalChunk(
         document_id=document.id,
         chunk_index=0,
         chunk_text="chunk",
-        embedding=[0.1, 0.2, 0.3],
+        start_offset=0,
+        end_offset=5,
+        token_count=None,
+        content_hash=document.content_hash,
         metadata_={},
+    )
+    db_session.add(chunk)
+    await db_session.flush()
+    embedding = EmbeddingRecord(
+        retrieval_chunk_id=chunk.id,
+        embedding=[0.0] * 1536,
+        provider="fake",
+        model="feature-hash-v1",
+        dimensions=1536,
+        content_hash=chunk.content_hash,
     )
     db_session.add(embedding)
     await db_session.flush()

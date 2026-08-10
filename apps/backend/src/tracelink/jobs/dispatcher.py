@@ -18,6 +18,10 @@ class ResearchTaskDispatcher(Protocol):
     ) -> str: ...
 
 
+class ReportDispatcher(Protocol):
+    async def dispatch(self, report_id: UUID) -> str: ...
+
+
 class CeleryResearchTaskDispatcher:
     async def dispatch(
         self,
@@ -39,5 +43,25 @@ class CeleryResearchTaskDispatcher:
         return celery_task_id
 
 
+class CeleryReportDispatcher:
+    async def dispatch(self, report_id: UUID) -> str:
+        from tracelink.jobs.reports import generate_investigation_report
+
+        celery_task_id = str(uuid4())
+        try:
+            await asyncio.to_thread(
+                generate_investigation_report.apply_async,
+                args=[str(report_id)],
+                task_id=celery_task_id,
+            )
+        except Exception as exc:
+            raise DispatchError("could not publish report task") from exc
+        return celery_task_id
+
+
 def get_research_task_dispatcher() -> ResearchTaskDispatcher:
     return CeleryResearchTaskDispatcher()
+
+
+def get_report_dispatcher() -> ReportDispatcher:
+    return CeleryReportDispatcher()

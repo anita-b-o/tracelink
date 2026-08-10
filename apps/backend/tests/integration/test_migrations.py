@@ -73,6 +73,8 @@ async def test_migration_round_trip(migrated_database_url: str) -> None:
         "entities",
         "relationships",
         "embedding_records",
+        "retrieval_chunks",
+        "investigation_reports",
         "entity_mentions",
         "entity_resolution_candidates",
         "relationship_candidates",

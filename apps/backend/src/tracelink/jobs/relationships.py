@@ -54,6 +54,12 @@ def process_document_relationships(
         async_worker_runtime.run(
             process_document_relationships_async(UUID(investigation_id), UUID(document_id))
         )
+        from tracelink.jobs.rag import index_document_for_retrieval
+
+        delivery_info = self.request.delivery_info or {}
+        routing_key = delivery_info.get("routing_key")
+        options = {"queue": routing_key} if routing_key else {}
+        index_document_for_retrieval.apply_async(args=[investigation_id, document_id], **options)
     except (OperationalError, TransientRelationshipExtractionProviderError) as exc:
         settings = get_settings()
         raise self.retry(

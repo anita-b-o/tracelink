@@ -27,7 +27,9 @@ los modelos SQLAlchemy porque `metadata` está reservado por la API declarativa.
 | `documents` | Contenido textual recuperado | SHA-256 de UTF-8; único por source y hash |
 | `evidence` | Evidencia que respalda un nodo o una relación | Source/Document/Artifact coherentes; offsets y fingerprint deduplicable |
 | `findings` | Conclusión de una investigación | confidence y relevance opcional 0..1 |
-| `embedding_records` | Reserva de esquema para chunks vectoriales | vector sin dimensión fija; chunk único por documento; sin búsqueda ni índice ANN |
+| `retrieval_chunks` | Unidad reproducible de recuperación | offsets, hash, metadata de chunker y `tsvector` generado |
+| `embedding_records` | Vector asociado a un RetrievalChunk | `vector(1536)`; provider/model/dimensions; sin mezcla de espacios |
+| `investigation_reports` | Reporte grounded auditable | fingerprint cacheable, estado Celery, provider/model y contenido JSONB |
 
 Cuando evidence referencia un document, el servicio verifica que el documento pertenezca al
 source declarado. Esta regla cruza tablas y se valida en dominio; las claves foráneas mantienen la
@@ -60,8 +62,8 @@ fragmentos, puertos default y casing del host sin reordenar query ni cambiar tra
 raíz. Los nuevos fetches reutilizan la Source bajo advisory lock; filas legacy no se eliminan. El
 contenido se deduplica por `(source_id, content_hash)` sin perder procedencia entre URLs.
 
-La columna `embedding` usa `vector` sin dimensión. La dimensión, modelo, métrica e índice se
-definirán en la fase de RAG con datos y proveedor conocidos.
+La columna `embedding` usa `vector(1536)`. Distintos provider/model pueden coexistir si respetan la
+dimensión, pero cada query selecciona exactamente un espacio. Los embeddings son datos derivados.
 
 ## Borrado y cascadas
 

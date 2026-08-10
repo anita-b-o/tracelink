@@ -70,6 +70,7 @@ class EvidenceRepository:
         start_offset: int | None,
         end_offset: int | None,
         locator: str | None,
+        excerpt: str | None,
         evidence_type: EvidenceType,
         metadata: JsonObject,
         fingerprint: str,
@@ -83,6 +84,7 @@ class EvidenceRepository:
             start_offset=start_offset,
             end_offset=end_offset,
             locator=locator,
+            excerpt=excerpt,
             evidence_type=evidence_type,
             metadata_=metadata,
             fingerprint=fingerprint,
@@ -91,6 +93,7 @@ class EvidenceRepository:
             constraint="uq_evidence_investigation_fingerprint",
             set_={
                 "confidence": insert_statement.excluded.confidence,
+                "excerpt": insert_statement.excluded.excerpt,
                 "metadata": insert_statement.excluded.metadata,
             },
         ).returning(Evidence)

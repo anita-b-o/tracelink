@@ -16,7 +16,9 @@ from tracelink.infrastructure.database import close_database, get_session_factor
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 TABLES = (
+    "investigation_reports",
     "embedding_records",
+    "retrieval_chunks",
     "findings",
     "evidence",
     "relationship_candidates",

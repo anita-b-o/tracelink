@@ -389,6 +389,7 @@ class DocumentRelationshipProcessingService:
             start_offset=candidate.start_offset,
             end_offset=candidate.end_offset,
             locator=f"document:{document.id}",
+            excerpt=excerpt,
             evidence_type=evidence_type,
             metadata={
                 "relationship_candidate_id": str(candidate.id),

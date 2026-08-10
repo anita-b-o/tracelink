@@ -27,9 +27,10 @@ Navegador
 - **Persistencia:** SQLAlchemy, PostgreSQL, Redis y migraciones Alembic.
 - **Research connectors:** adaptadores detrás de protocolos y un registry común; su seguridad y
   operación están en [research-connectors.md](research-connectors.md).
-- **Document processing:** chunking, extracción estructurada, resolución de entidades y relaciones
-  explicables respaldadas por Evidence. Providers se inyectan detrás de protocolos; Fase 5 no
-  incorpora LLM comercial, embeddings ni RAG.
+- **Document processing:** extracción y retrieval usan configuraciones de chunking separadas. El
+  pipeline Celery añade embeddings y PostgreSQL ejecuta retrieval híbrido aislado por Investigation.
+- **Grounding:** providers fake u OpenAI opt-in reciben contexto estructurado; citas y tenancy se
+  validan fuera del modelo. Ver [rag.md](rag.md) y [grounded-reports.md](grounded-reports.md).
 - **Jobs:** Celery enruta ResearchTasks hacia connectors o no-ops controlados. SQLAlchemy y el
   cliente HTTP comparten un lifecycle por proceso worker.
 
@@ -52,9 +53,9 @@ worker son JSON, incorporan IDs de correlación y no incluyen la consulta origin
 
 ## Decisiones diferidas
 
-Permisos, provider comercial, RAG, Findings automáticos y graph UI continúan diferidos. Los
-connectors crean Sources/Documents y los jobs posteriores crean mentions, entities, candidates,
-relationships y evidence; el esquema vectorial sigue sin dimensión ni índice funcional.
+Permisos, Findings automáticos, graph UI y despliegue continúan diferidos. OpenAI es sólo un
+adaptador opt-in; fake providers mantienen operación y tests herméticos. Vector search permanece
+exacta hasta que volumen o latencia justifiquen ANN.
 
 El detalle del workflow, sus locks y sus políticas está en
 [investigation-workflow.md](investigation-workflow.md).

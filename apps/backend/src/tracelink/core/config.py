@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, computed_field, model_validator
+from pydantic import Field, SecretStr, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +44,21 @@ class Settings(BaseSettings):
     relationship_possible_threshold: float = Field(default=0.65, ge=0, le=1)
     relationship_max_candidates_per_document: int = Field(default=100, ge=1, le=1000)
 
+    rag_chunk_size: int = Field(default=1600, ge=500, le=100_000)
+    rag_chunk_overlap: int = Field(default=200, ge=0, le=10_000)
+    rag_top_k: int = Field(default=10, ge=1, le=50)
+    rag_semantic_weight: float = Field(default=0.70, ge=0, le=1)
+    rag_lexical_weight: float = Field(default=0.30, ge=0, le=1)
+    rag_min_retrieval_score: float = Field(default=0.20, ge=0, le=1)
+    rag_min_evidence_count: int = Field(default=1, ge=0, le=100)
+    rag_max_context_chars: int = Field(default=24_000, ge=1000, le=1_000_000)
+    embedding_batch_size: int = Field(default=32, ge=1, le=2048)
+    embedding_provider: Literal["fake", "openai"] = "fake"
+    embedding_model: str = "text-embedding-3-small"
+    llm_provider: Literal["fake", "openai"] = "fake"
+    llm_model: str = "gpt-5.6-luna"
+    openai_api_key: SecretStr | None = None
+
     @model_validator(mode="after")
     def validate_entity_pipeline_settings(self) -> "Settings":
         if self.entity_extraction_chunk_overlap >= self.entity_extraction_chunk_size:
@@ -57,6 +72,14 @@ class Settings(BaseSettings):
             raise ValueError(
                 "relationship possible threshold must be lower than auto accept threshold"
             )
+        if self.rag_chunk_overlap >= self.rag_chunk_size:
+            raise ValueError("RAG chunk overlap must be smaller than chunk size")
+        if abs(self.rag_semantic_weight + self.rag_lexical_weight - 1.0) > 1e-9:
+            raise ValueError("RAG semantic and lexical weights must sum to 1")
+        if (self.embedding_provider == "openai" or self.llm_provider == "openai") and (
+            self.openai_api_key is None or not self.openai_api_key.get_secret_value().strip()
+        ):
+            raise ValueError("OPENAI_API_KEY is required when an OpenAI provider is enabled")
         return self
 
     @computed_field  # type: ignore[prop-decorator]

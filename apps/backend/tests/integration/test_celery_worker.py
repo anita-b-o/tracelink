@@ -5,25 +5,42 @@ import time
 from uuid import uuid4
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tracelink.core.config import get_settings
-from tracelink.domain.enums import EntityType, FakeResearchMode, ResearchTaskStatus
+from tracelink.domain.enums import (
+    EntityType,
+    FakeResearchMode,
+    InvestigationReportStatus,
+    InvestigationReportType,
+    ResearchTaskStatus,
+)
 from tracelink.domain.models import (
     Document,
+    EmbeddingRecord,
     Entity,
     EntityMention,
     Evidence,
+    InvestigationReport,
     Relationship,
     RelationshipCandidate,
+    RetrievalChunk,
     Source,
 )
+from tracelink.infrastructure.database import get_session
 from tracelink.jobs.celery_app import celery_app
+from tracelink.jobs.reports import generate_investigation_report
 from tracelink.jobs.research import execute_research_task
+from tracelink.main import app
 from tracelink.repositories.investigations import InvestigationRepository
 from tracelink.repositories.research_tasks import ResearchTaskRepository
+from tracelink.services.embedding_providers import FakeEmbeddingProvider
+from tracelink.services.grounded_reports import InvestigationReportService
+from tracelink.services.hybrid_retrieval import HybridRetriever
 from tracelink.services.investigation_workflow import InvestigationWorkflowService
+from tracelink.services.llm_providers import FakeLLMProvider
 
 pytestmark = [pytest.mark.integration, pytest.mark.celery_smoke, pytest.mark.asyncio]
 
@@ -64,6 +81,7 @@ async def test_real_celery_worker_consumes_research_task(db_session: AsyncSessio
             pytest.fail("Celery worker did not become ready")
 
         investigation = await InvestigationRepository(db_session).create("Smoke", "Query")
+        investigation_id = investigation.id
         started = await InvestigationWorkflowService(db_session, get_settings()).start(
             investigation.id
         )
@@ -96,7 +114,18 @@ async def test_real_celery_worker_consumes_research_task(db_session: AsyncSessio
                 select(func.count()).select_from(Relationship)
             )
             evidence_count = await db_session.scalar(select(func.count()).select_from(Evidence))
-            if mention_count and mention_count >= 2 and relationship_count and evidence_count:
+            chunk_count = await db_session.scalar(select(func.count()).select_from(RetrievalChunk))
+            embedding_count = await db_session.scalar(
+                select(func.count()).select_from(EmbeddingRecord)
+            )
+            if (
+                mention_count
+                and mention_count >= 2
+                and relationship_count
+                and evidence_count
+                and chunk_count
+                and embedding_count
+            ):
                 entity_types = set(await db_session.scalars(select(Entity.type)))
                 assert {EntityType.PERSON, EntityType.COMPANY} <= entity_types
                 assert await db_session.scalar(select(func.count()).select_from(Source)) == 1
@@ -107,15 +136,73 @@ async def test_real_celery_worker_consumes_research_task(db_session: AsyncSessio
                 )
                 assert relationship_count == 1
                 assert evidence_count == 1
+                assert chunk_count >= 1
+                assert embedding_count == chunk_count
                 break
             await asyncio.sleep(0.1)
         else:
             output = (await process.stdout.read()).decode() if process.stdout else ""
             pytest.fail(f"Celery worker did not complete relationship pipeline:\n{output}")
-    finally:
-        process.terminate()
+
+        async def session_override():  # type: ignore[no-untyped-def]
+            yield db_session
+
+        app.dependency_overrides[get_session] = session_override
         try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                search_response = await client.post(
+                    f"/api/investigations/{investigation_id}/search",
+                    json={"query": "Juan Pérez director ACME", "top_k": 5},
+                )
+            assert search_response.status_code == 200, search_response.text
+            assert search_response.json()
+        finally:
+            app.dependency_overrides.clear()
+
+        settings = get_settings()
+        report = await InvestigationReportService(
+            db_session,
+            settings,
+            FakeLLMProvider(),
+            HybridRetriever(db_session, settings, FakeEmbeddingProvider()),
+        ).request(
+            investigation_id,
+            InvestigationReportType.EXECUTIVE_SUMMARY,
+            None,
+        )
+        report_id = report.id
+        await db_session.commit()
+        generate_investigation_report.apply_async(args=[str(report_id)], queue=queue)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            await db_session.rollback()
+            db_session.expire_all()
+            refreshed = await db_session.get(InvestigationReport, report_id)
+            if refreshed is not None and refreshed.status is InvestigationReportStatus.COMPLETED:
+                assert refreshed.content is not None
+                assert refreshed.content["citations"]
+                break
+            await asyncio.sleep(0.1)
+        else:
+            await db_session.rollback()
+            db_session.expire_all()
+            refreshed = await db_session.get(InvestigationReport, report_id)
+            detail = (
+                f"status={refreshed.status.value} error={refreshed.last_error_message}"
+                if refreshed is not None
+                else "report missing"
+            )
+            process.terminate()
             await asyncio.wait_for(process.wait(), timeout=10)
-        except TimeoutError:
-            process.kill()
-            await asyncio.wait_for(process.wait(), timeout=5)
+            output = (await process.stdout.read()).decode() if process.stdout else ""
+            pytest.fail(f"Celery worker did not complete grounded report: {detail}\n{output}")
+    finally:
+        if process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=10)
+            except TimeoutError:
+                process.kill()
+                await asyncio.wait_for(process.wait(), timeout=5)

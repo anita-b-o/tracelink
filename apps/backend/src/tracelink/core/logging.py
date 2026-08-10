@@ -36,6 +36,20 @@ class JsonFormatter(logging.Formatter):
             "resolution_score",
             "extraction_method",
             "mention_count",
+            "retrieval_chunk_id",
+            "retrieval_chunk_count",
+            "embedding_generated_count",
+            "embedding_provider",
+            "embedding_model",
+            "retrieval_top_k",
+            "semantic_score",
+            "lexical_score",
+            "combined_score",
+            "result_count",
+            "report_id",
+            "llm_provider",
+            "llm_model",
+            "abstained",
         ):
             value = getattr(record, field, None)
             if value is not None:

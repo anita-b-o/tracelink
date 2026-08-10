@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import (
     CheckConstraint,
+    Computed,
     DateTime,
     Enum,
     Float,
@@ -19,7 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,6 +29,8 @@ from tracelink.domain.enums import (
     EntityResolutionCandidateStatus,
     EntityType,
     EvidenceType,
+    InvestigationReportStatus,
+    InvestigationReportType,
     InvestigationStatus,
     RelationshipCandidateStatus,
     RelationshipClaimKind,
@@ -91,6 +94,9 @@ class Investigation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="investigation", cascade="all, delete-orphan", passive_deletes=True
     )
     relationship_candidates: Mapped[list[RelationshipCandidate]] = relationship(
+        back_populates="investigation", cascade="all, delete-orphan", passive_deletes=True
+    )
+    reports: Mapped[list[InvestigationReport]] = relationship(
         back_populates="investigation", cascade="all, delete-orphan", passive_deletes=True
     )
 
@@ -283,7 +289,7 @@ class Document(UUIDPrimaryKeyMixin, Base):
     )
 
     source: Mapped[Source] = relationship(back_populates="documents")
-    embeddings: Mapped[list[EmbeddingRecord]] = relationship(
+    retrieval_chunks: Mapped[list[RetrievalChunk]] = relationship(
         back_populates="document", cascade="all, delete-orphan", passive_deletes=True
     )
     entity_mentions: Mapped[list[EntityMention]] = relationship(
@@ -306,6 +312,11 @@ class InvestigationArtifact(UUIDPrimaryKeyMixin, Base):
             ["documents.id", "documents.source_id"],
             name="fk_investigation_artifacts_document_source",
             ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_investigation_artifacts_investigation_document",
+            "investigation_id",
+            "document_id",
         ),
     )
 
@@ -585,11 +596,14 @@ class Finding(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     investigation: Mapped[Investigation] = relationship(back_populates="findings")
 
 
-class EmbeddingRecord(UUIDPrimaryKeyMixin, Base):
-    __tablename__ = "embedding_records"
+class RetrievalChunk(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "retrieval_chunks"
     __table_args__ = (
         CheckConstraint("chunk_index >= 0", name="chunk_index_non_negative"),
-        UniqueConstraint("document_id", "chunk_index", name="uq_embedding_document_chunk"),
+        CheckConstraint("start_offset >= 0 AND end_offset > start_offset", name="offsets_valid"),
+        CheckConstraint("token_count IS NULL OR token_count >= 0", name="token_count_non_negative"),
+        UniqueConstraint("document_id", "chunk_index", name="uq_retrieval_chunk_document_index"),
+        Index("ix_retrieval_chunks_search_vector", "search_vector", postgresql_using="gin"),
     )
 
     document_id: Mapped[UUID] = mapped_column(
@@ -597,12 +611,94 @@ class EmbeddingRecord(UUIDPrimaryKeyMixin, Base):
     )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(VECTOR(), nullable=False)
+    start_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    token_count: Mapped[int | None] = mapped_column(Integer)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     metadata_: Mapped[JsonObject] = mapped_column(
         "metadata", JSONB, default=dict, server_default="{}", nullable=False
+    )
+    search_vector: Mapped[Any] = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('simple', chunk_text)", persisted=True),
+        nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    document: Mapped[Document] = relationship(back_populates="embeddings")
+    document: Mapped[Document] = relationship(back_populates="retrieval_chunks")
+    embeddings: Mapped[list[EmbeddingRecord]] = relationship(
+        back_populates="retrieval_chunk", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class EmbeddingRecord(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "embedding_records"
+    __table_args__ = (
+        CheckConstraint("dimensions = 1536", name="dimensions_fixed"),
+        UniqueConstraint(
+            "retrieval_chunk_id", "provider", "model", name="uq_embedding_chunk_provider_model"
+        ),
+        Index("ix_embedding_records_provider_model", "provider", "model", "dimensions"),
+    )
+
+    retrieval_chunk_id: Mapped[UUID] = mapped_column(
+        ForeignKey("retrieval_chunks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    embedding: Mapped[list[float]] = mapped_column(VECTOR(1536), nullable=False)
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    dimensions: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    retrieval_chunk: Mapped[RetrievalChunk] = relationship(back_populates="embeddings")
+
+
+class InvestigationReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "investigation_reports"
+    __table_args__ = (
+        CheckConstraint("attempts >= 0", name="attempts_non_negative"),
+        UniqueConstraint(
+            "investigation_id",
+            "type",
+            "subject_entity_id",
+            "input_fingerprint",
+            name="uq_investigation_report_fingerprint",
+            postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    investigation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("investigations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    subject_entity_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("entities.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    type: Mapped[InvestigationReportType] = mapped_column(
+        enum_type(InvestigationReportType, "investigation_report_type"), nullable=False, index=True
+    )
+    status: Mapped[InvestigationReportStatus] = mapped_column(
+        enum_type(InvestigationReportStatus, "investigation_report_status"),
+        default=InvestigationReportStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+    content: Mapped[JsonObject | None] = mapped_column(JSONB)
+    parameters: Mapped[JsonObject] = mapped_column(
+        JSONB, default=dict, server_default="{}", nullable=False
+    )
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    input_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    active_celery_task_id: Mapped[str | None] = mapped_column(String(255))
+    last_error_code: Mapped[str | None] = mapped_column(String(100))
+    last_error_message: Mapped[str | None] = mapped_column(Text)
+
+    investigation: Mapped[Investigation] = relationship(back_populates="reports")
+    subject_entity: Mapped[Entity | None] = relationship()

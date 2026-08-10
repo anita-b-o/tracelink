@@ -1,5 +1,9 @@
 # Modelo de Evidence
 
+Fase 6 consume este modelo sin debilitarlo: el contexto grounded incluye sólo Evidence de la
+Investigation consultada y cada citation se vuelve a validar contra Evidence o
+InvestigationArtifact. Evidence supporting/contradicting se conserva como lados separados.
+
 Cada Relationship producida por el pipeline tiene al menos una Evidence creada atómicamente. La
 ruta auditable es:
 

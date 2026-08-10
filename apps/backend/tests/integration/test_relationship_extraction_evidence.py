@@ -135,7 +135,8 @@ async def test_strong_text_creates_relationship_evidence_idempotently_and_api_re
     assert relationship is not None and relationship.type is RelationshipType.DIRECTOR_OF
     assert relationship.status is AssertionStatus.CONFIRMED
     assert evidence is not None and evidence.relationship_id == relationship.id
-    assert evidence.excerpt is None
+    assert first[0].start_offset is not None and first[0].end_offset is not None
+    assert evidence.excerpt == text[first[0].start_offset : first[0].end_offset]
     assert await db_session.scalar(select(func.count()).select_from(RelationshipCandidate)) == 1
     assert await db_session.scalar(select(func.count()).select_from(Relationship)) == 1
     assert await db_session.scalar(select(func.count()).select_from(Evidence)) == 1

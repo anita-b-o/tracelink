@@ -11,7 +11,13 @@ celery_app = Celery(
     "tracelink",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["tracelink.jobs.research", "tracelink.jobs.entities", "tracelink.jobs.relationships"],
+    include=[
+        "tracelink.jobs.research",
+        "tracelink.jobs.entities",
+        "tracelink.jobs.relationships",
+        "tracelink.jobs.rag",
+        "tracelink.jobs.reports",
+    ],
 )
 celery_app.conf.update(
     accept_content=["json"],
