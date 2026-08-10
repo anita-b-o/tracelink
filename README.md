@@ -4,9 +4,9 @@ TraceLink será un sistema web de investigación OSINT asistida por IA para due 
 empresas y personas. Su principio central es que cada entidad, relación y conclusión debe poder
 rastrearse hasta evidencia pública o aportada legalmente por el usuario.
 
-El repositorio contiene la **Fase 3**: core domain, workflow asíncrono y research connectors para
-URL/HTML, RDAP y búsqueda desacoplada. Todavía no incluye usuarios, extracción de entidades,
-resolución, RAG ni LLM.
+El repositorio contiene la **Fase 4**: core domain, workflow asíncrono, research connectors y
+extracción/resolución de entidades trazable. Todavía no incluye usuarios, relationships derivadas,
+RAG, embeddings funcionales ni LLM productivo.
 
 ## Arquitectura actual
 
@@ -107,6 +107,10 @@ Los valores predeterminados del backend apuntan a los puertos locales de Postgre
 | `RESEARCH_WEB_SEARCH_MAX_RESULTS` | Límite de resultados por búsqueda | `10` |
 | `RESEARCH_CACHE_TTL_SECONDS` | TTL de cache Redis | `3600` |
 | `RESEARCH_CONNECTOR_REQUESTS_PER_SECOND` | Rate limit base por fuente | `2` |
+| `ENTITY_EXTRACTION_CHUNK_SIZE` | Tamaño reproducible de chunk en caracteres | `4000` |
+| `ENTITY_EXTRACTION_CHUNK_OVERLAP` | Overlap entre chunks | `300` |
+| `ENTITY_RESOLUTION_AUTO_MATCH_THRESHOLD` | Umbral de auto-match | `0.90` |
+| `ENTITY_RESOLUTION_POSSIBLE_MATCH_THRESHOLD` | Umbral de possible match | `0.65` |
 
 `DATABASE_URL`, `REDIS_URL`, `CELERY_BROKER_URL` y `CELERY_RESULT_BACKEND` se configuran
 directamente para los contenedores. Se pueden definir explícitamente al ejecutar el backend de
@@ -160,10 +164,9 @@ GitHub Actions ejecuta estos checks y un smoke test del stack. No realiza deploy
 - El workflow está documentado en
   [docs/investigation-workflow.md](docs/investigation-workflow.md).
 - No existe autenticación ni asociación de registros a usuarios.
-- Celery enruta WEB_SEARCH/PUBLIC_MENTIONS a búsqueda desacoplada, DOMAIN_LOOKUP a RDAP e
-  IDENTIFY_ENTITY a un no-op controlado hasta Fase 4.
+- Celery enruta research a connectors y procesa Documents en un job separado de entity extraction.
 - pgvector y `embedding_records` están preparados, pero no hay generación ni búsqueda vectorial.
-- No hay extracción de entidades, IA, RAG ni datos falsos en el grafo.
+- No hay relationships derivadas, IA productiva, RAG ni datos falsos en el grafo.
 
 Consultá [la arquitectura](docs/architecture.md) para los límites definidos para las próximas
 fases y [research-connectors.md](docs/research-connectors.md) para seguridad y operación.

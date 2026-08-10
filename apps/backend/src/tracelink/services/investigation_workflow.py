@@ -198,27 +198,27 @@ class InvestigationWorkflowService:
         research_task_id: UUID,
         celery_task_id: str,
         output: ConnectorOutput,
-    ) -> bool:
+    ) -> ResearchTaskResult | None:
         locked = await self._lock_aggregate(research_task_id)
         if locked is None:
-            return False
+            return None
         investigation, task, tasks = locked
         if investigation.status is InvestigationStatus.CANCELLED:
             if task.status is ResearchTaskStatus.RUNNING:
                 transition_research_task(task, ResearchTaskStatus.CANCELLED)
             await self.session.flush()
-            return False
+            return None
         if (
             task.status is not ResearchTaskStatus.RUNNING
             or task.active_celery_task_id != celery_task_id
         ):
-            return False
-        result = await ResearchArtifactService(self.session).persist(output)
+            return None
+        result = await ResearchArtifactService(self.session).persist(investigation.id, output)
         transition_research_task(task, ResearchTaskStatus.COMPLETED)
         task.result = result.model_dump(mode="json")
         self._recalculate(investigation, tasks)
         await self.session.flush()
-        return True
+        return result
 
     async def fail(
         self,

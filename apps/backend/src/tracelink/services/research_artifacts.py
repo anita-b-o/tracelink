@@ -9,6 +9,7 @@ from tracelink.connectors.models import ConnectorOutput, ResearchTaskResult, Sou
 from tracelink.domain.models import Source
 from tracelink.domain.normalization import sha256_text
 from tracelink.repositories.documents import DocumentRepository
+from tracelink.repositories.investigation_artifacts import InvestigationArtifactRepository
 from tracelink.repositories.sources import SourceRepository
 from tracelink.services.documents import DocumentService
 
@@ -23,6 +24,7 @@ class ResearchArtifactService:
         self.session = session
         self.sources = SourceRepository(session)
         self.documents = DocumentService(session, DocumentRepository(session))
+        self.investigation_artifacts = InvestigationArtifactRepository(session)
 
     async def _get_or_create_source(self, artifact: SourceArtifact) -> Source:
         url_hash = sha256_text(artifact.normalized_url)
@@ -48,15 +50,22 @@ class ResearchArtifactService:
             metadata=artifact.metadata,
         )
 
-    async def persist(self, output: ConnectorOutput) -> ResearchTaskResult:
+    async def persist(self, investigation_id: UUID, output: ConnectorOutput) -> ResearchTaskResult:
         sources_by_url: dict[str, Source] = {}
         source_ids: list[UUID] = []
         document_ids: list[UUID] = []
+        document_urls = {artifact.source_normalized_url for artifact in output.documents}
         for source_artifact in output.sources:
             source = await self._get_or_create_source(source_artifact)
             sources_by_url[source_artifact.normalized_url] = source
             if source.id not in source_ids:
                 source_ids.append(source.id)
+            if source_artifact.normalized_url not in document_urls:
+                await self.investigation_artifacts.associate(
+                    investigation_id=investigation_id,
+                    source_id=source.id,
+                    document_id=None,
+                )
         for document_artifact in output.documents:
             source = sources_by_url[document_artifact.source_normalized_url]
             document = await self.documents.create(
@@ -67,6 +76,11 @@ class ResearchArtifactService:
             )
             if document.id not in document_ids:
                 document_ids.append(document.id)
+            await self.investigation_artifacts.associate(
+                investigation_id=investigation_id,
+                source_id=source.id,
+                document_id=document.id,
+            )
         return ResearchTaskResult(
             connector=output.connector,
             status=output.status,

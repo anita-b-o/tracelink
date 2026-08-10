@@ -28,6 +28,14 @@ class JsonFormatter(logging.Formatter):
             "duration_ms",
             "cache_hit",
             "retry_count",
+            "document_id",
+            "entity_mention_id",
+            "entity_id",
+            "entity_type",
+            "resolution_decision",
+            "resolution_score",
+            "extraction_method",
+            "mention_count",
         ):
             value = getattr(record, field, None)
             if value is not None:

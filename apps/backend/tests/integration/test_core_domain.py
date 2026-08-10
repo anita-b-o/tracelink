@@ -234,7 +234,7 @@ async def test_investigation_and_alias_cascades_preserve_shared_records(
     entity = await EntityService(EntityRepository(db_session)).create(
         entity_type=EntityType.COMPANY,
         canonical_name="ACME",
-        aliases=["ACME Corp"],
+        aliases=["ACME International"],
     )
     source = await SourceRepository(db_session).create(source_type="WEB", url="https://example.com")
     await EvidenceService(db_session, EvidenceRepository(db_session)).create(

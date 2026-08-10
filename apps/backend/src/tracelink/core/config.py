@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,6 +35,22 @@ class Settings(BaseSettings):
     research_web_search_max_results: int = Field(default=10, ge=1, le=100)
     research_cache_ttl_seconds: int = Field(default=3600, ge=1, le=604_800)
     research_connector_requests_per_second: int = Field(default=2, ge=1, le=100)
+
+    entity_extraction_chunk_size: int = Field(default=4000, ge=500, le=100_000)
+    entity_extraction_chunk_overlap: int = Field(default=300, ge=0, le=10_000)
+    entity_resolution_auto_match_threshold: float = Field(default=0.90, ge=0, le=1)
+    entity_resolution_possible_match_threshold: float = Field(default=0.65, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_entity_pipeline_settings(self) -> "Settings":
+        if self.entity_extraction_chunk_overlap >= self.entity_extraction_chunk_size:
+            raise ValueError("entity extraction overlap must be smaller than chunk size")
+        if (
+            self.entity_resolution_possible_match_threshold
+            >= self.entity_resolution_auto_match_threshold
+        ):
+            raise ValueError("possible match threshold must be lower than auto match threshold")
+        return self
 
     @computed_field  # type: ignore[prop-decorator]
     @property

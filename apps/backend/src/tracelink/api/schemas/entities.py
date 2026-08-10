@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints
 
-from tracelink.domain.enums import EntityType
+from tracelink.domain.enums import EntityResolutionCandidateStatus, EntityType
 
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
@@ -38,3 +38,36 @@ class EntityRead(BaseModel):
     aliases: list[EntityAliasRead]
     created_at: datetime
     updated_at: datetime
+
+
+class EntityMentionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    investigation_id: UUID
+    document_id: UUID
+    entity_id: UUID | None
+    entity_type: EntityType
+    surface_form: str
+    normalized_form: str
+    start_offset: int | None
+    end_offset: int | None
+    chunk_index: int | None
+    extraction_method: str
+    confidence: float
+    metadata: dict[str, JsonValue] = Field(validation_alias="metadata_")
+    created_at: datetime
+
+
+class EntityResolutionCandidateRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    investigation_id: UUID
+    mention_id: UUID
+    candidate_entity_id: UUID
+    score: float
+    status: EntityResolutionCandidateStatus
+    signals: dict[str, JsonValue]
+    created_at: datetime
+    reviewed_at: datetime | None

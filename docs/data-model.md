@@ -2,9 +2,9 @@
 
 ## Alcance
 
-El núcleo persistente y auditable incluye el workflow con connectors de Fase 3. El grafo de entidades,
-fuentes y documentos es compartido entre investigaciones; evidence y findings pertenecen a una
-investigación. Todavía no existen autenticación, conectores, extracción automática ni RAG.
+El núcleo persistente y auditable incluye connectors y entity extraction/resolution de Fase 4. El
+grafo de entidades, fuentes y documentos es compartido; associations, mentions, evidence y findings
+pertenecen a una investigación. Todavía no existen autenticación, relationships derivadas ni RAG.
 
 Todos los identificadores son UUID generados por la aplicación. Los timestamps usan zona horaria y
 los objetos extensibles se almacenan en JSONB. Los campos `metadata` aparecen como `metadata_` en
@@ -18,6 +18,9 @@ los modelos SQLAlchemy porque `metadata` está reservado por la API declarativa.
 | `research_tasks` | Plan ejecutable simulado dentro de un caso | tipo único por investigación; attempts no negativo; fechas ordenadas; resultado JSON y último error |
 | `entities` | Nodo canónico del grafo | nombre canónico y forma normalizada; nombres iguales no implican identidad |
 | `entity_aliases` | Nombre alternativo de una entidad | único por entidad y alias normalizado; no repite el nombre canónico |
+| `investigation_artifacts` | Source y Document usados por un caso | triple Investigation/Source/Document único, incluido NULL |
+| `entity_mentions` | Aparición extraída antes o después de resolver | fingerprint único por Investigation/Document; confidence y offsets válidos |
+| `entity_resolution_candidates` | Match explicable y revisable | único por mention/candidate; score 0..1 y status controlado |
 | `relationships` | Arista dirigida entre entidades | sin self-reference; confidence 0..1; única por origen, destino y tipo |
 | `sources` | Identidad estable de una URL pública | URL normalizada y SHA-256 indexados; writes serializados por advisory lock |
 | `documents` | Contenido textual recuperado | SHA-256 de UTF-8; único por source y hash |
@@ -45,9 +48,9 @@ hasta incorporar connectors reales.
 
 ## Normalización y deduplicación
 
-Los nombres aplican Unicode NFKC, trim, colapso de whitespace y `casefold()`. No se quitan acentos,
-no se translitera y no existe fuzzy matching. La búsqueda por nombre puede devolver varias
-entidades porque dos personas o empresas distintas pueden compartir nombre.
+Los nombres conservan canonical/normalized y agregan `comparison_key` por tipo. COMPANY y
+ORGANIZATION equivalen designadores legales sólo en esa clave; DOMAIN aplica IDNA; ADDRESS y PERSON
+son conservadores. Candidate generation usa exact/alias y trigram indexado, sin vector search.
 
 Los aliases se deduplican por `(entity_id, normalized_alias)`. Las relationships se deduplican como
 aristas dirigidas por `(source_entity_id, target_entity_id, type)`. La URL normalizada descarta
@@ -76,6 +79,8 @@ Fase 1 no expone operaciones de borrado.
 - estados de investigations, tasks, relationships y findings;
 - `(research_task.investigation_id, research_task.type)` único para idempotencia del planner;
 - `(entity.type, entity.normalized_name)`, normalized name y normalized aliases;
+- comparison keys exactas y GIN trigram para entities/aliases;
+- artifact triple, mention fingerprint y mention/candidate únicos;
 - ambos extremos de relationships y el par origen/destino;
 - `(sources.url_hash, sources.normalized_url)`, type y retrieved_at;
 - `documents.content_hash` y claves foráneas de evidence;

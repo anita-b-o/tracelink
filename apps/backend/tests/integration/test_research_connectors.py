@@ -109,8 +109,9 @@ async def test_artifact_persistence_deduplicates_source_and_document(
     connector = ArtifactConnector("rdap", ResearchTaskType.DOMAIN_LOOKUP)
     output = await connector.execute("example.com", ConnectorContext(investigation_id=UUID(int=1)))
     service = ResearchArtifactService(db_session)
-    first = await service.persist(output)
-    second = await service.persist(output)
+    investigation = await InvestigationRepository(db_session).create("Artifacts", "example")
+    first = await service.persist(investigation.id, output)
+    second = await service.persist(investigation.id, output)
     assert first.source_ids == second.source_ids
     assert first.document_ids == second.document_ids
     assert await db_session.scalar(select(func.count()).select_from(Source)) == 1

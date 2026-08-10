@@ -1,9 +1,15 @@
+import asyncio
 from typing import Annotated, NoReturn
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tracelink.api.schemas.entities import (
+    EntityMentionRead,
+    EntityRead,
+    EntityResolutionCandidateRead,
+)
 from tracelink.api.schemas.investigations import (
     InvestigationCreate,
     InvestigationProgressRead,
@@ -28,6 +34,10 @@ from tracelink.jobs.dispatcher import (
     DispatchError,
     ResearchTaskDispatcher,
     get_research_task_dispatcher,
+)
+from tracelink.repositories.entity_mentions import (
+    EntityMentionRepository,
+    EntityResolutionCandidateRepository,
 )
 from tracelink.repositories.investigations import InvestigationRepository
 from tracelink.services.errors import DomainConflictError, DomainNotFoundError
@@ -112,7 +122,16 @@ async def ingest_investigation_url(
         raise_connector_http_error(exc)
     if await InvestigationRepository(session).get_by_id(investigation_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="investigation not found")
-    return await ResearchArtifactService(session).persist(output)
+    result = await ResearchArtifactService(session).persist(investigation_id, output)
+    await session.commit()
+    from tracelink.jobs.entities import process_document_entities
+
+    for document_id in result.document_ids:
+        await asyncio.to_thread(
+            process_document_entities.apply_async,
+            args=[str(investigation_id), str(document_id)],
+        )
+    return result
 
 
 @router.post(
@@ -172,3 +191,50 @@ async def get_investigation_progress(investigation_id: UUID, session: Session) -
         )
     except DomainNotFoundError as exc:
         raise_workflow_http_error(exc)
+
+
+async def _require_investigation(investigation_id: UUID, session: AsyncSession) -> None:
+    if await InvestigationRepository(session).get_by_id(investigation_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="investigation not found")
+
+
+@router.get("/{investigation_id}/entities", response_model=list[EntityRead])
+async def list_investigation_entities(
+    investigation_id: UUID,
+    session: Session,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> object:
+    await _require_investigation(investigation_id, session)
+    return await EntityMentionRepository(session).list_entities_by_investigation(
+        investigation_id, limit=limit, offset=offset
+    )
+
+
+@router.get("/{investigation_id}/entity-mentions", response_model=list[EntityMentionRead])
+async def list_investigation_entity_mentions(
+    investigation_id: UUID,
+    session: Session,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> object:
+    await _require_investigation(investigation_id, session)
+    return await EntityMentionRepository(session).list_by_investigation(
+        investigation_id, limit=limit, offset=offset
+    )
+
+
+@router.get(
+    "/{investigation_id}/resolution-candidates",
+    response_model=list[EntityResolutionCandidateRead],
+)
+async def list_investigation_resolution_candidates(
+    investigation_id: UUID,
+    session: Session,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> object:
+    await _require_investigation(investigation_id, session)
+    return await EntityResolutionCandidateRepository(session).list_by_investigation(
+        investigation_id, limit=limit, offset=offset
+    )

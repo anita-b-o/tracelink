@@ -42,6 +42,19 @@ class EntityType(StrEnum):
     DOCUMENT = "DOCUMENT"
 
 
+class EntityResolutionDecision(StrEnum):
+    MATCH_EXISTING = "MATCH_EXISTING"
+    CREATE_NEW = "CREATE_NEW"
+    POSSIBLE_MATCH = "POSSIBLE_MATCH"
+
+
+class EntityResolutionCandidateStatus(StrEnum):
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+    AUTO_MATCHED = "AUTO_MATCHED"
+
+
 class RelationshipType(StrEnum):
     DIRECTOR_OF = "DIRECTOR_OF"
     OWNER_OF = "OWNER_OF"

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any
 from uuid import UUID
@@ -138,14 +139,25 @@ async def execute_research_task_async(
                 ),
             )
     else:
+        persisted_result: ResearchTaskResult | None = None
         async with session_factory() as session, session.begin():
             workflow = InvestigationWorkflowService(session, settings)
             if output is not None:
-                await workflow.complete_with_output(research_task_id, celery_task_id, output)
+                persisted_result = await workflow.complete_with_output(
+                    research_task_id, celery_task_id, output
+                )
             else:
                 assert result is not None
                 await workflow.complete(research_task_id, celery_task_id, result)
         logger.info("research task completed", extra={**context, "status": "COMPLETED"})
+        if persisted_result is not None:
+            from tracelink.jobs.entities import process_document_entities
+
+            for document_id in persisted_result.document_ids:
+                await asyncio.to_thread(
+                    process_document_entities.apply_async,
+                    args=[str(task.investigation_id), str(document_id)],
+                )
 
 
 @celery_app.task(  # type: ignore[untyped-decorator]

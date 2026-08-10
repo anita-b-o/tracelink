@@ -2,10 +2,12 @@
 
 ## Arquitectura
 
-La Fase 3 incorpora adaptadores de fuentes públicas sin extracción de entidades. Los connectors
-reciben DTOs Pydantic y producen `ConnectorOutput`; nunca retornan modelos SQLAlchemy.
-`ResearchArtifactService` convierte esos artefactos en `Source` y `Document` dentro de la
-transacción que completa el `ResearchTask`.
+Los adaptadores de fuentes públicas siguen sin extraer entidades dentro del connector. Reciben DTOs
+Pydantic y producen `ConnectorOutput`; nunca retornan modelos SQLAlchemy. Fase 4 procesa después los
+Documents persistidos.
+`ResearchArtifactService` convierte esos artefactos en `Source` y `Document`, crea la asociación
+`InvestigationArtifact` dentro de la transacción y, tras el commit, se encola el job de entities por
+cada Document.
 
 Los contratos se dividen en `ResearchConnector`, `SearchConnector`, `FetchConnector` y
 `WebSearchProvider`. `ConnectorRegistry` resuelve por nombre o task type y rechaza mappings
@@ -23,7 +25,8 @@ se agregan fixtures sin Internet; el worker no requiere nuevas ramas.
   `test` usa un fake determinista; sin provider real queda `skipped`.
 
 `WEB_SEARCH` y `PUBLIC_MENTIONS` usan búsqueda; `DOMAIN_LOOKUP` usa RDAP sólo para un dominio puro;
-`IDENTIFY_ENTITY` permanece diferido hasta Fase 4.
+`IDENTIFY_ENTITY` no inventa fuentes: la extracción de Fase 4 corre sobre Documents producidos por
+cualquier task o por URL ingestion.
 
 ## HTTP, SSRF y uso responsable
 

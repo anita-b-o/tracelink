@@ -11,6 +11,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -24,6 +25,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from tracelink.domain.enums import (
     AssertionStatus,
+    EntityResolutionCandidateStatus,
     EntityType,
     InvestigationStatus,
     RelationshipType,
@@ -79,6 +81,12 @@ class Investigation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     findings: Mapped[list[Finding]] = relationship(
         back_populates="investigation", cascade="all, delete-orphan", passive_deletes=True
     )
+    artifacts: Mapped[list[InvestigationArtifact]] = relationship(
+        back_populates="investigation", cascade="all, delete-orphan", passive_deletes=True
+    )
+    entity_mentions: Mapped[list[EntityMention]] = relationship(
+        back_populates="investigation", cascade="all, delete-orphan", passive_deletes=True
+    )
 
 
 class ResearchTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -119,11 +127,20 @@ class ResearchTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class Entity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "entities"
-    __table_args__ = (Index("ix_entities_type_normalized_name", "type", "normalized_name"),)
+    __table_args__ = (
+        Index("ix_entities_type_normalized_name", "type", "normalized_name"),
+        Index(
+            "ix_entities_comparison_key_trgm",
+            "comparison_key",
+            postgresql_using="gin",
+            postgresql_ops={"comparison_key": "gin_trgm_ops"},
+        ),
+    )
 
     type: Mapped[EntityType] = mapped_column(enum_type(EntityType, "entity_type"), nullable=False)
     canonical_name: Mapped[str] = mapped_column(String(500), nullable=False)
     normalized_name: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    comparison_key: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
     metadata_: Mapped[JsonObject] = mapped_column(
         "metadata", JSONB, default=dict, server_default="{}", nullable=False
     )
@@ -137,6 +154,13 @@ class EntityAlias(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "entity_aliases"
     __table_args__ = (
         UniqueConstraint("entity_id", "normalized_alias", name="uq_entity_alias_normalized"),
+        UniqueConstraint("entity_id", "comparison_key", name="uq_entity_alias_comparison_key"),
+        Index(
+            "ix_entity_aliases_comparison_key_trgm",
+            "comparison_key",
+            postgresql_using="gin",
+            postgresql_ops={"comparison_key": "gin_trgm_ops"},
+        ),
     )
 
     entity_id: Mapped[UUID] = mapped_column(
@@ -144,6 +168,7 @@ class EntityAlias(UUIDPrimaryKeyMixin, Base):
     )
     alias: Mapped[str] = mapped_column(String(500), nullable=False)
     normalized_alias: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    comparison_key: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -218,6 +243,7 @@ class Document(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "documents"
     __table_args__ = (
         UniqueConstraint("source_id", "content_hash", name="uq_document_source_hash"),
+        UniqueConstraint("id", "source_id", name="uq_document_id_source"),
     )
 
     source_id: Mapped[UUID] = mapped_column(
@@ -237,6 +263,132 @@ class Document(UUIDPrimaryKeyMixin, Base):
     embeddings: Mapped[list[EmbeddingRecord]] = relationship(
         back_populates="document", cascade="all, delete-orphan", passive_deletes=True
     )
+    entity_mentions: Mapped[list[EntityMention]] = relationship(
+        back_populates="document", passive_deletes=True
+    )
+
+
+class InvestigationArtifact(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "investigation_artifacts"
+    __table_args__ = (
+        UniqueConstraint(
+            "investigation_id",
+            "source_id",
+            "document_id",
+            name="uq_investigation_artifact",
+            postgresql_nulls_not_distinct=True,
+        ),
+        ForeignKeyConstraint(
+            ["document_id", "source_id"],
+            ["documents.id", "documents.source_id"],
+            name="fk_investigation_artifacts_document_source",
+            ondelete="RESTRICT",
+        ),
+    )
+
+    investigation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("investigations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_id: Mapped[UUID] = mapped_column(
+        ForeignKey("sources.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    document_id: Mapped[UUID | None] = mapped_column(nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    investigation: Mapped[Investigation] = relationship(back_populates="artifacts")
+
+
+class EntityMention(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "entity_mentions"
+    __table_args__ = (
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
+        CheckConstraint("chunk_index IS NULL OR chunk_index >= 0", name="chunk_index_non_negative"),
+        CheckConstraint(
+            "(start_offset IS NULL AND end_offset IS NULL) OR "
+            "(start_offset >= 0 AND end_offset > start_offset)",
+            name="offsets_valid",
+        ),
+        UniqueConstraint(
+            "investigation_id", "document_id", "fingerprint", name="uq_entity_mention_fingerprint"
+        ),
+        UniqueConstraint("id", "investigation_id", name="uq_entity_mention_id_investigation"),
+    )
+
+    investigation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("investigations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    entity_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("entities.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    entity_type: Mapped[EntityType] = mapped_column(
+        enum_type(EntityType, "entity_type"), nullable=False, index=True
+    )
+    surface_form: Mapped[str] = mapped_column(String(500), nullable=False)
+    normalized_form: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    start_offset: Mapped[int | None] = mapped_column(Integer)
+    end_offset: Mapped[int | None] = mapped_column(Integer)
+    chunk_index: Mapped[int | None] = mapped_column(Integer)
+    extraction_method: Mapped[str] = mapped_column(String(100), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    metadata_: Mapped[JsonObject] = mapped_column(
+        "metadata", JSONB, default=dict, server_default="{}", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    investigation: Mapped[Investigation] = relationship(back_populates="entity_mentions")
+    document: Mapped[Document] = relationship(back_populates="entity_mentions")
+    entity: Mapped[Entity | None] = relationship()
+    resolution_candidates: Mapped[list[EntityResolutionCandidate]] = relationship(
+        back_populates="mention", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class EntityResolutionCandidate(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "entity_resolution_candidates"
+    __table_args__ = (
+        CheckConstraint("score >= 0 AND score <= 1", name="score_range"),
+        UniqueConstraint(
+            "mention_id", "candidate_entity_id", name="uq_resolution_candidate_mention_entity"
+        ),
+        ForeignKeyConstraint(
+            ["mention_id", "investigation_id"],
+            ["entity_mentions.id", "entity_mentions.investigation_id"],
+            name="fk_resolution_candidates_mention_investigation",
+            ondelete="CASCADE",
+        ),
+    )
+
+    investigation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("investigations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    mention_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    candidate_entity_id: Mapped[UUID] = mapped_column(
+        ForeignKey("entities.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[EntityResolutionCandidateStatus] = mapped_column(
+        enum_type(EntityResolutionCandidateStatus, "entity_resolution_candidate_status"),
+        nullable=False,
+        index=True,
+    )
+    signals: Mapped[JsonObject] = mapped_column(
+        JSONB, default=dict, server_default="{}", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    mention: Mapped[EntityMention] = relationship(back_populates="resolution_candidates")
+    candidate_entity: Mapped[Entity] = relationship()
 
 
 class Evidence(UUIDPrimaryKeyMixin, Base):

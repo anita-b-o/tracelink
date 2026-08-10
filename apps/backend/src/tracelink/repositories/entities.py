@@ -22,12 +22,14 @@ class EntityRepository:
         entity_type: EntityType,
         canonical_name: str,
         normalized_name: str,
+        comparison_key: str,
         metadata: JsonObject | None = None,
     ) -> Entity:
         entity = Entity(
             type=entity_type,
             canonical_name=canonical_name,
             normalized_name=normalized_name,
+            comparison_key=comparison_key,
             metadata_=metadata or {},
         )
         self.session.add(entity)
@@ -72,22 +74,29 @@ class EntityRepository:
         )
         return list(result.unique())
 
-    async def get_alias(self, entity_id: UUID, normalized_alias: str) -> EntityAlias | None:
+    async def get_alias(self, entity_id: UUID, comparison_key: str) -> EntityAlias | None:
         return cast(
             EntityAlias | None,
             await self.session.scalar(
                 select(EntityAlias).where(
                     EntityAlias.entity_id == entity_id,
-                    EntityAlias.normalized_alias == normalized_alias,
+                    EntityAlias.comparison_key == comparison_key,
                 )
             ),
         )
 
-    async def add_alias(self, entity: Entity, alias: str, normalized_alias: str) -> EntityAlias:
+    async def add_alias(
+        self,
+        entity: Entity,
+        alias: str,
+        normalized_alias: str,
+        comparison_key: str | None = None,
+    ) -> EntityAlias:
         entity_alias = EntityAlias(
             entity_id=entity.id,
             alias=alias,
             normalized_alias=normalized_alias,
+            comparison_key=comparison_key or normalized_alias,
         )
         self.session.add(entity_alias)
         await self.session.flush()
@@ -100,10 +109,12 @@ class EntityRepository:
         *,
         canonical_name: str,
         normalized_name: str,
+        comparison_key: str,
         metadata: JsonObject | None = None,
     ) -> Entity:
         entity.canonical_name = canonical_name
         entity.normalized_name = normalized_name
+        entity.comparison_key = comparison_key
         if metadata is not None:
             entity.metadata_ = metadata
         await self.session.flush()
