@@ -495,6 +495,7 @@ class RelationshipCandidate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     investigation: Mapped[Investigation] = relationship(back_populates="relationship_candidates")
     document: Mapped[Document] = relationship()

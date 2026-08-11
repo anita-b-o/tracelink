@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints
 
+from tracelink.api.schemas.sources import SourceSummaryRead
 from tracelink.domain.enums import EntityResolutionCandidateStatus, EntityType
 
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
@@ -28,7 +29,7 @@ class EntityAliasRead(BaseModel):
 
 
 class EntityRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: UUID
     type: EntityType
@@ -41,7 +42,7 @@ class EntityRead(BaseModel):
 
 
 class EntityMentionRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: UUID
     investigation_id: UUID
@@ -59,6 +60,16 @@ class EntityMentionRead(BaseModel):
     created_at: datetime
 
 
+class InvestigationEntityRead(EntityRead):
+    mention_count: int
+
+
+class EntityMentionDetailRead(EntityMentionRead):
+    source: SourceSummaryRead
+    document_title: str | None
+    context_preview: str
+
+
 class EntityResolutionCandidateRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -71,3 +82,9 @@ class EntityResolutionCandidateRead(BaseModel):
     signals: dict[str, JsonValue]
     created_at: datetime
     reviewed_at: datetime | None
+
+
+class EntityResolutionCandidateDetailRead(EntityResolutionCandidateRead):
+    mention: EntityMentionDetailRead
+    provisional_entity: EntityRead | None
+    candidate_entity: EntityRead

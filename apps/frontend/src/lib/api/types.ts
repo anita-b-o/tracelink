@@ -1,0 +1,25 @@
+import type { components } from "./schema";
+
+export type Investigation = components["schemas"]["InvestigationSummaryRead"];
+export type Progress = components["schemas"]["InvestigationProgressRead"];
+export type Task = components["schemas"]["ResearchTaskRead"];
+export type Entity = components["schemas"]["InvestigationEntityRead"];
+export type Mention = components["schemas"]["EntityMentionDetailRead"];
+export type EntityCandidate = components["schemas"]["EntityResolutionCandidateDetailRead"];
+export type Relationship = components["schemas"]["RelationshipRead"];
+export type RelationshipDetail = components["schemas"]["RelationshipDetailRead"];
+export type RelationshipCandidate = components["schemas"]["RelationshipCandidateRead"];
+export type Evidence = components["schemas"]["RelationshipEvidenceRead"];
+export type Source = components["schemas"]["SourceSummaryRead"];
+export type DocumentSummary = components["schemas"]["DocumentSummaryRead"];
+export type DocumentDetail = components["schemas"]["DocumentDetailRead"];
+export type GraphData = components["schemas"]["InvestigationGraphRead"];
+export type Answer = components["schemas"]["GroundedAnswerRead"];
+export type SearchHit = components["schemas"]["SearchHitRead"];
+export type ReportSummary = components["schemas"]["InvestigationReportSummaryRead"];
+export type Report = components["schemas"]["InvestigationReportRead"];
+export type EntityType = components["schemas"]["EntityType"];
+export type RelationshipType = components["schemas"]["RelationshipType"];
+export type RelationshipStatus = components["schemas"]["AssertionStatus"];
+export type ReportType = components["schemas"]["InvestigationReportType"];
+export type ReportContent = components["schemas"]["ReportContentRead"];

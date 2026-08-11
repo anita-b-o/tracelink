@@ -1,17 +1,25 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    StringConstraints,
+    model_validator,
+)
 
 from tracelink.domain.enums import (
     InvestigationReportStatus,
     InvestigationReportType,
     RelationshipType,
 )
-from tracelink.domain.rag import GroundedClaim
+from tracelink.domain.rag import GeneratedReportSection, GroundedClaim
 
 SearchQuery = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)
@@ -79,7 +87,16 @@ class CitationRead(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: str
-    type: str
+    type: Literal["EVIDENCE", "CHUNK", "DOCUMENT", "SOURCE"]
+    evidence_id: UUID | None = None
+    chunk_id: UUID | None = None
+    document_id: UUID | None = None
+    source_id: UUID | None = None
+    start_offset: int | None = None
+    end_offset: int | None = None
+    source_url: str | None = None
+    excerpt: str | None = None
+    confidence: float | None = None
 
 
 class GroundedAnswerRead(BaseModel):
@@ -118,6 +135,29 @@ class InvestigationReportSummaryRead(BaseModel):
     updated_at: datetime
 
 
+class ReportTimelineItemRead(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    date: str
+    kind: str
+
+
+class ReportContentRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    abstained: bool
+    executive_summary: str
+    summary_claims: list[GroundedClaim] = Field(default_factory=list)
+    sections: list[GeneratedReportSection]
+    key_entities: list[dict[str, JsonValue]]
+    key_relationships: list[dict[str, JsonValue]]
+    timeline: list[ReportTimelineItemRead]
+    contradictions: list[dict[str, JsonValue]]
+    limitations: list[str]
+    citations: list[CitationRead]
+
+
 class InvestigationReportRead(InvestigationReportSummaryRead):
-    content: dict[str, Any] | None
+    content: ReportContentRead | None
     last_error_message: str | None

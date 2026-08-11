@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tracelink.api.schemas.research_tasks import ResearchTaskRead
 from tracelink.core.config import get_settings
+from tracelink.domain.enums import FakeResearchMode
 from tracelink.infrastructure.database import get_session
 from tracelink.jobs.dispatcher import (
     DispatchError,
@@ -37,8 +38,9 @@ async def get_research_task(research_task_id: UUID, session: Session) -> object:
 async def retry_research_task(
     research_task_id: UUID, session: Session, dispatcher: Dispatcher
 ) -> object:
+    settings = get_settings()
     try:
-        research_task = await InvestigationWorkflowService(session, get_settings()).retry(
+        research_task = await InvestigationWorkflowService(session, settings).retry(
             research_task_id
         )
         await session.commit()
@@ -49,7 +51,14 @@ async def retry_research_task(
     except DomainConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     try:
-        await dispatcher.dispatch(research_task.id)
+        await dispatcher.dispatch(
+            research_task.id,
+            mode=(
+                FakeResearchMode(settings.fake_research_mode)
+                if settings.fake_research_mode
+                else None
+            ),
+        )
     except DispatchError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

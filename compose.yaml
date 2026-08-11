@@ -7,7 +7,8 @@ services:
       dockerfile: infra/docker/frontend.Dockerfile
       target: development
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+      NEXT_PUBLIC_GRAPH_MAX_NODES: ${NEXT_PUBLIC_GRAPH_MAX_NODES:-250}
       WATCHPACK_POLLING: "true"
     ports:
       - "${FRONTEND_PORT:-3000}:3000"

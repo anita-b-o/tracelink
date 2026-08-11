@@ -1,0 +1,23 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+
+import { EmptyState, ErrorState, LoadingState } from "@/components/ui/async-state";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { api } from "@/lib/api/client";
+import type { Relationship, RelationshipCandidate, Source } from "@/lib/api/types";
+
+export interface TimelineEvent { id:string; date:string; kind:"RELATIONSHIP_START"|"RELATIONSHIP_END"|"CONTRADICTION"|"SOURCE_PUBLISHED"|"CLAIM"; title:string; detail:string; }
+
+function partialKey(value:string):[number,number,number,number]{const parts=value.split("-").map(Number);return[parts[0]??0,parts[1]??0,parts[2]??0,parts.length]}
+export function sortTimeline(events:TimelineEvent[]) { const priority={RELATIONSHIP_START:0,CLAIM:1,CONTRADICTION:2,RELATIONSHIP_END:3,SOURCE_PUBLISHED:4}; return [...events].sort((a,b)=>{const ak=partialKey(a.date),bk=partialKey(b.date);for(let i=0;i<4;i++){if(ak[i]!==bk[i])return ak[i]-bk[i]}return priority[a.kind]-priority[b.kind]||a.id.localeCompare(b.id)}); }
+export function buildTimeline(relationships:Relationship[],candidates:RelationshipCandidate[],sources:Source[]):TimelineEvent[]{const events:TimelineEvent[]=[];relationships.forEach(item=>{const identity=`${item.source_entity.canonical_name} ${item.type.replaceAll("_"," ")} ${item.target_entity.canonical_name}`;if(item.temporal_start)events.push({id:`${item.id}:start`,date:item.temporal_start,kind:"RELATIONSHIP_START",title:"Relationship started",detail:identity});if(item.temporal_end)events.push({id:`${item.id}:end`,date:item.temporal_end,kind:"RELATIONSHIP_END",title:"Relationship ended",detail:identity});if(item.status==="CONTRADICTED"){const date=item.temporal_end??item.temporal_start??item.last_observed_at?.slice(0,10);if(date)events.push({id:`${item.id}:contradicted`,date,kind:"CONTRADICTION",title:"Relationship contradicted",detail:identity})}});candidates.filter(item=>["ACCEPTED","AUTO_ACCEPTED","CONTRADICTED"].includes(item.status)).forEach(item=>{const date=item.claim_kind==="ENDS"?(item.temporal_end??item.temporal_start):(item.temporal_start??item.source?.published_at?.slice(0,10));if(date)events.push({id:`${item.id}:claim`,date,kind:item.claim_kind==="NEGATES"?"CONTRADICTION":"CLAIM",title:`${item.claim_kind} claim`,detail:`${item.source_entity.canonical_name} ${item.type.replaceAll("_"," ")} ${item.target_entity.canonical_name}`})});sources.forEach(item=>{if(item.published_at)events.push({id:`${item.id}:published`,date:item.published_at.slice(0,10),kind:"SOURCE_PUBLISHED",title:"Source published",detail:item.title??item.publisher??new URL(item.url).host})});return sortTimeline(events)}
+
+async function loadPages<T>(fetchPage:(offset:number)=>Promise<T[]>, requested:number) {
+  const items:T[]=[];
+  while(items.length<requested){const page=await fetchPage(items.length);items.push(...page);if(page.length<100)break;}
+  return items.slice(0,requested);
+}
+
+export function TimelineView({id}:{id:string}){const[limit,setLimit]=useState(100);const relationships=useQuery({queryKey:["timeline-relationships",id,limit],queryFn:()=>loadPages(offset=>api.relationships(id,{limit:100,offset}),limit)});const candidates=useQuery({queryKey:["timeline-candidates",id,limit],queryFn:()=>loadPages(offset=>api.relationshipCandidates(id,{limit:100,offset}),limit)});const sources=useQuery({queryKey:["timeline-sources",id,limit],queryFn:()=>loadPages(offset=>api.sources(id,{limit:100,offset}),limit)});const loading=relationships.isLoading||candidates.isLoading||sources.isLoading;const error=relationships.error||candidates.error||sources.error;const events=buildTimeline(relationships.data??[],candidates.data??[],sources.data??[]);if(loading)return<LoadingState label="Assembling timeline…"/>;if(error)return<ErrorState error={error} retry={()=>{void relationships.refetch();void candidates.refetch();void sources.refetch()}}/>;return<><div className="section-heading"><div><h2>Timeline</h2><p>Partial dates are preserved exactly as extracted. No month or day is inferred.</p></div></div>{!events.length?<EmptyState title="No dated events" detail="Dates will appear when relationships, claims, or published sources provide them."/>:<div className="panel"><div className="timeline">{events.map(event=><article className="timeline-event" key={event.id}><time>{event.date}</time><h3>{event.title}</h3><p>{event.detail}</p><StatusBadge status={event.kind}/></article>)}</div>{[relationships.data,candidates.data,sources.data].some(items=>items?.length===limit)&&limit<500&&<button className="button secondary" onClick={()=>setLimit(value=>Math.min(value+100,500))}>Load more events</button>}</div>}</>}

@@ -11,6 +11,17 @@ pytestmark = pytest.mark.integration
 @pytest.mark.asyncio
 async def test_migration_round_trip(migrated_database_url: str) -> None:
     _ = migrated_database_url
+    command.downgrade(alembic_config(), "0006_rag_embeddings_reports")
+    async with get_engine().connect() as connection:
+        reviewed_at_before_upgrade = await connection.scalar(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = 'relationship_candidates' "
+                "AND column_name = 'reviewed_at'"
+            )
+        )
+    assert reviewed_at_before_upgrade is None
+    command.upgrade(alembic_config(), "head")
     command.downgrade(alembic_config(), "0004_entity_extraction")
     async with get_engine().connect() as connection:
         candidate_table = await connection.scalar(
@@ -66,6 +77,14 @@ async def test_migration_round_trip(migrated_database_url: str) -> None:
                 )
             )
         )
+        relationship_candidate_columns = set(
+            await connection.scalars(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = 'relationship_candidates'"
+                )
+            )
+        )
 
     assert extension == "vector"
     assert {
@@ -81,4 +100,5 @@ async def test_migration_round_trip(migrated_database_url: str) -> None:
         "investigation_artifacts",
     } <= tables
     assert "normalized_url" in source_columns
+    assert "reviewed_at" in relationship_candidate_columns
     command.check(alembic_config())

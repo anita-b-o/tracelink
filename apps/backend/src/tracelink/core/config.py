@@ -26,6 +26,9 @@ class Settings(BaseSettings):
 
     research_task_max_attempts: int = Field(default=3, ge=1)
     fake_research_delay_ms: int = Field(default=25, ge=0, le=60_000)
+    fake_research_mode: (
+        Literal["SUCCESS", "FAIL_ONCE", "ALWAYS_FAIL", "SLOW", "PIPELINE_SUCCESS"] | None
+    ) = None
     research_http_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     research_http_max_response_bytes: int = Field(default=5_000_000, ge=1, le=50_000_000)
     research_http_max_redirects: int = Field(default=5, ge=0, le=20)

@@ -9,7 +9,7 @@ from tracelink.api.schemas.relationships import (
     RelationshipEvidenceRead,
     RelationshipRead,
 )
-from tracelink.domain.models import Document, Evidence, Relationship
+from tracelink.domain.models import Document, Evidence, Relationship, Source
 from tracelink.infrastructure.database import get_session
 from tracelink.repositories.evidence import EvidenceRepository
 from tracelink.repositories.relationships import RelationshipRepository
@@ -36,13 +36,17 @@ def relationship_read(relationship: Relationship, evidence_count: int) -> Relati
 
 async def evidence_read(session: AsyncSession, evidence: Evidence) -> RelationshipEvidenceRead:
     preview = evidence.excerpt
+    document_title = None
     if preview is None and evidence.document_id is not None:
         document = await session.get(Document, evidence.document_id)
         if document is not None:
+            source_for_title = await session.get(Source, document.source_id)
+            document_title = source_for_title.title if source_for_title else None
             if evidence.start_offset is not None and evidence.end_offset is not None:
                 preview = document.raw_text[evidence.start_offset : evidence.end_offset]
             elif evidence.locator:
                 preview = document.raw_text[:500]
+    source = await session.get(Source, evidence.source_id)
     return RelationshipEvidenceRead(
         id=evidence.id,
         investigation_id=evidence.investigation_id,
@@ -55,6 +59,21 @@ async def evidence_read(session: AsyncSession, evidence: Evidence) -> Relationsh
         end_offset=evidence.end_offset,
         locator=evidence.locator,
         preview=preview[:500] if preview else None,
+        source=(
+            {
+                "id": source.id,
+                "type": source.type,
+                "publisher": source.publisher,
+                "url": source.url,
+                "title": source.title,
+                "published_at": source.published_at,
+                "retrieved_at": source.retrieved_at,
+                "document_count": 0,
+            }
+            if source
+            else None
+        ),
+        document_title=document_title,
         metadata=evidence.metadata_,
         created_at=evidence.created_at,
     )

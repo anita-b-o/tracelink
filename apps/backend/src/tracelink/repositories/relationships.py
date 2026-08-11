@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -90,12 +90,21 @@ class RelationshipRepository:
         return list(result)
 
     async def list_by_investigation(
-        self, investigation_id: UUID, *, limit: int, offset: int
+        self,
+        investigation_id: UUID,
+        *,
+        limit: int,
+        offset: int,
+        relationship_type: RelationshipType | None = None,
+        relationship_status: AssertionStatus | None = None,
+        entity_id: UUID | None = None,
+        sort: str = "recent",
     ) -> builtins.list[tuple[Relationship, int]]:
         from tracelink.domain.models import Evidence
 
-        result = await self.session.execute(
-            select(Relationship, func.count(Evidence.id))
+        evidence_count = func.count(Evidence.id)
+        statement = (
+            select(Relationship, evidence_count)
             .join(Evidence, Evidence.relationship_id == Relationship.id)
             .options(
                 selectinload(Relationship.source_entity),
@@ -103,10 +112,25 @@ class RelationshipRepository:
             )
             .where(Evidence.investigation_id == investigation_id)
             .group_by(Relationship.id)
-            .order_by(Relationship.updated_at.desc(), Relationship.id.desc())
-            .limit(limit)
-            .offset(offset)
         )
+        if relationship_type is not None:
+            statement = statement.where(Relationship.type == relationship_type)
+        if relationship_status is not None:
+            statement = statement.where(Relationship.status == relationship_status)
+        if entity_id is not None:
+            statement = statement.where(
+                or_(
+                    Relationship.source_entity_id == entity_id,
+                    Relationship.target_entity_id == entity_id,
+                )
+            )
+        if sort == "evidence_count":
+            statement = statement.order_by(evidence_count.desc(), Relationship.id.desc())
+        elif sort == "confidence":
+            statement = statement.order_by(Relationship.confidence.desc(), Relationship.id.desc())
+        else:
+            statement = statement.order_by(Relationship.updated_at.desc(), Relationship.id.desc())
+        result = await self.session.execute(statement.limit(limit).offset(offset))
         return [(relationship, int(count)) for relationship, count in result]
 
     async def upsert(

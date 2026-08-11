@@ -1,26 +1,27 @@
 import asyncio
-from typing import Annotated, NoReturn
+from typing import Annotated, Literal, NoReturn
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from tracelink.api.routes.relationships import relationship_read
+from tracelink.api.routes.workspace import candidate_read, source_summary
 from tracelink.api.schemas.entities import (
-    EntityMentionRead,
+    EntityMentionDetailRead,
     EntityRead,
-    EntityResolutionCandidateRead,
+    EntityResolutionCandidateDetailRead,
+    InvestigationEntityRead,
 )
 from tracelink.api.schemas.investigations import (
     InvestigationCreate,
     InvestigationProgressRead,
     InvestigationRead,
+    InvestigationSummaryRead,
 )
-from tracelink.api.schemas.relationships import (
-    RelationshipCandidateRead,
-    RelationshipEntitySummary,
-    RelationshipRead,
-)
+from tracelink.api.schemas.relationships import RelationshipCandidateRead, RelationshipRead
 from tracelink.api.schemas.research_tasks import ResearchTaskRead
 from tracelink.api.schemas.sources import UrlIngestionCreate
 from tracelink.connectors.errors import (
@@ -35,22 +36,34 @@ from tracelink.connectors.errors import (
 from tracelink.connectors.models import ConnectorContext, ResearchTaskResult
 from tracelink.connectors.registry import ConnectorRegistry, get_connector_registry
 from tracelink.core.config import get_settings
+from tracelink.domain.enums import (
+    AssertionStatus,
+    EntityResolutionCandidateStatus,
+    EntityType,
+    FakeResearchMode,
+    RelationshipCandidateStatus,
+    RelationshipType,
+)
+from tracelink.domain.models import (
+    Document,
+    Entity,
+    EntityMention,
+    EntityResolutionCandidate,
+    RelationshipCandidate,
+    Source,
+)
 from tracelink.infrastructure.database import get_session
 from tracelink.jobs.dispatcher import (
     DispatchError,
     ResearchTaskDispatcher,
     get_research_task_dispatcher,
 )
-from tracelink.repositories.entity_mentions import (
-    EntityMentionRepository,
-    EntityResolutionCandidateRepository,
-)
 from tracelink.repositories.investigations import InvestigationRepository
-from tracelink.repositories.relationship_candidates import RelationshipCandidateRepository
 from tracelink.repositories.relationships import RelationshipRepository
 from tracelink.services.errors import DomainConflictError, DomainNotFoundError
 from tracelink.services.investigation_workflow import InvestigationWorkflowService
 from tracelink.services.research_artifacts import ResearchArtifactService
+from tracelink.services.workspace import investigation_summaries
 
 router = APIRouter()
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -89,21 +102,22 @@ async def create_investigation(payload: InvestigationCreate, session: Session) -
     return await InvestigationRepository(session).create(payload.title, payload.original_query)
 
 
-@router.get("", response_model=list[InvestigationRead])
+@router.get("", response_model=list[InvestigationSummaryRead])
 async def list_investigations(
     session: Session,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> object:
-    return await InvestigationRepository(session).list(limit=limit, offset=offset)
+    items = await InvestigationRepository(session).list(limit=limit, offset=offset)
+    return await investigation_summaries(session, items)
 
 
-@router.get("/{investigation_id}", response_model=InvestigationRead)
+@router.get("/{investigation_id}", response_model=InvestigationSummaryRead)
 async def get_investigation(investigation_id: UUID, session: Session) -> object:
     investigation = await InvestigationRepository(session).get_by_id(investigation_id)
     if investigation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="investigation not found")
-    return investigation
+    return (await investigation_summaries(session, [investigation]))[0]
 
 
 @router.post(
@@ -150,8 +164,9 @@ async def ingest_investigation_url(
 async def start_investigation(
     investigation_id: UUID, session: Session, dispatcher: Dispatcher
 ) -> object:
+    settings = get_settings()
     try:
-        result = await InvestigationWorkflowService(session, get_settings()).start(investigation_id)
+        result = await InvestigationWorkflowService(session, settings).start(investigation_id)
         await session.commit()
         await session.refresh(result.investigation)
         response = InvestigationRead.model_validate(result.investigation)
@@ -159,7 +174,14 @@ async def start_investigation(
         raise_workflow_http_error(exc)
     try:
         for research_task_id in result.pending_task_ids:
-            await dispatcher.dispatch(research_task_id)
+            await dispatcher.dispatch(
+                research_task_id,
+                mode=(
+                    FakeResearchMode(settings.fake_research_mode)
+                    if settings.fake_research_mode
+                    else None
+                ),
+            )
     except DispatchError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -206,58 +228,201 @@ async def _require_investigation(investigation_id: UUID, session: AsyncSession) 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="investigation not found")
 
 
-@router.get("/{investigation_id}/entities", response_model=list[EntityRead])
+@router.get("/{investigation_id}/entities", response_model=list[InvestigationEntityRead])
 async def list_investigation_entities(
     investigation_id: UUID,
     session: Session,
+    entity_type: EntityType | None = None,
+    q: str | None = None,
+    sort: Literal["recent", "mention_count"] = "recent",
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> object:
     await _require_investigation(investigation_id, session)
-    return await EntityMentionRepository(session).list_entities_by_investigation(
-        investigation_id, limit=limit, offset=offset
+    count = func.count(EntityMention.id)
+    statement = (
+        select(Entity, count.label("mention_count"))
+        .join(EntityMention, EntityMention.entity_id == Entity.id)
+        .options(selectinload(Entity.aliases))
+        .where(EntityMention.investigation_id == investigation_id)
+        .group_by(Entity.id)
     )
+    if entity_type:
+        statement = statement.where(Entity.type == entity_type)
+    if q and q.strip():
+        pattern = f"%{q.strip()}%"
+        statement = statement.where(
+            or_(Entity.canonical_name.ilike(pattern), Entity.normalized_name.ilike(pattern))
+        )
+    ordering = (
+        (count.desc(), Entity.canonical_name, Entity.id)
+        if sort == "mention_count"
+        else (Entity.created_at.desc(), Entity.id.desc())
+    )
+    rows = (await session.execute(statement.order_by(*ordering).limit(limit).offset(offset))).all()
+    return [
+        InvestigationEntityRead(
+            **EntityRead.model_validate(entity).model_dump(), mention_count=int(mention_count)
+        )
+        for entity, mention_count in rows
+    ]
 
 
-@router.get("/{investigation_id}/entity-mentions", response_model=list[EntityMentionRead])
+@router.get("/{investigation_id}/entity-mentions", response_model=list[EntityMentionDetailRead])
 async def list_investigation_entity_mentions(
     investigation_id: UUID,
     session: Session,
+    entity_id: UUID | None = None,
+    document_id: UUID | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> object:
     await _require_investigation(investigation_id, session)
-    return await EntityMentionRepository(session).list_by_investigation(
-        investigation_id, limit=limit, offset=offset
+    statement = (
+        select(EntityMention, Document, Source)
+        .join(Document, Document.id == EntityMention.document_id)
+        .join(Source, Source.id == Document.source_id)
+        .where(EntityMention.investigation_id == investigation_id)
     )
+    if entity_id:
+        statement = statement.where(EntityMention.entity_id == entity_id)
+    if document_id:
+        statement = statement.where(EntityMention.document_id == document_id)
+    rows = (
+        await session.execute(
+            statement.order_by(EntityMention.created_at.desc(), EntityMention.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+    output: list[EntityMentionDetailRead] = []
+    for mention, document, source in rows:
+        start = max((mention.start_offset or 0) - 120, 0)
+        end = min((mention.end_offset or start) + 180, len(document.raw_text))
+        output.append(
+            EntityMentionDetailRead(
+                id=mention.id,
+                investigation_id=mention.investigation_id,
+                document_id=mention.document_id,
+                entity_id=mention.entity_id,
+                entity_type=mention.entity_type,
+                surface_form=mention.surface_form,
+                normalized_form=mention.normalized_form,
+                start_offset=mention.start_offset,
+                end_offset=mention.end_offset,
+                chunk_index=mention.chunk_index,
+                extraction_method=mention.extraction_method,
+                confidence=mention.confidence,
+                metadata=mention.metadata_,
+                created_at=mention.created_at,
+                source=source_summary(source),
+                document_title=source.title,
+                context_preview=document.raw_text[start:end],
+            )
+        )
+    return output
 
 
 @router.get(
     "/{investigation_id}/resolution-candidates",
-    response_model=list[EntityResolutionCandidateRead],
+    response_model=list[EntityResolutionCandidateDetailRead],
 )
 async def list_investigation_resolution_candidates(
     investigation_id: UUID,
     session: Session,
+    candidate_status: EntityResolutionCandidateStatus | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> object:
     await _require_investigation(investigation_id, session)
-    return await EntityResolutionCandidateRepository(session).list_by_investigation(
-        investigation_id, limit=limit, offset=offset
+    statement = (
+        select(EntityResolutionCandidate, EntityMention, Document, Source)
+        .join(EntityMention, EntityMention.id == EntityResolutionCandidate.mention_id)
+        .join(Document, Document.id == EntityMention.document_id)
+        .join(Source, Source.id == Document.source_id)
+        .options(
+            selectinload(EntityResolutionCandidate.candidate_entity).selectinload(Entity.aliases),
+            selectinload(EntityResolutionCandidate.mention)
+            .selectinload(EntityMention.entity)
+            .selectinload(Entity.aliases),
+        )
+        .where(EntityResolutionCandidate.investigation_id == investigation_id)
     )
+    if candidate_status:
+        statement = statement.where(EntityResolutionCandidate.status == candidate_status)
+    rows = (
+        await session.execute(
+            statement.order_by(
+                EntityResolutionCandidate.created_at.desc(), EntityResolutionCandidate.id.desc()
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+    output: list[EntityResolutionCandidateDetailRead] = []
+    for candidate, mention, document, source in rows:
+        start = max((mention.start_offset or 0) - 120, 0)
+        end = min((mention.end_offset or start) + 180, len(document.raw_text))
+        mention_read = EntityMentionDetailRead(
+            id=mention.id,
+            investigation_id=mention.investigation_id,
+            document_id=mention.document_id,
+            entity_id=mention.entity_id,
+            entity_type=mention.entity_type,
+            surface_form=mention.surface_form,
+            normalized_form=mention.normalized_form,
+            start_offset=mention.start_offset,
+            end_offset=mention.end_offset,
+            chunk_index=mention.chunk_index,
+            extraction_method=mention.extraction_method,
+            confidence=mention.confidence,
+            metadata=mention.metadata_,
+            created_at=mention.created_at,
+            source=source_summary(source),
+            document_title=source.title,
+            context_preview=document.raw_text[start:end],
+        )
+        output.append(
+            EntityResolutionCandidateDetailRead(
+                id=candidate.id,
+                investigation_id=candidate.investigation_id,
+                mention_id=candidate.mention_id,
+                candidate_entity_id=candidate.candidate_entity_id,
+                score=candidate.score,
+                status=candidate.status,
+                signals=candidate.signals,
+                created_at=candidate.created_at,
+                reviewed_at=candidate.reviewed_at,
+                mention=mention_read,
+                provisional_entity=(
+                    EntityRead.model_validate(mention.entity) if mention.entity else None
+                ),
+                candidate_entity=EntityRead.model_validate(candidate.candidate_entity),
+            )
+        )
+    return output
 
 
 @router.get("/{investigation_id}/relationships", response_model=list[RelationshipRead])
 async def list_investigation_relationships(
     investigation_id: UUID,
     session: Session,
+    relationship_type: RelationshipType | None = None,
+    relationship_status: AssertionStatus | None = None,
+    entity_id: UUID | None = None,
+    sort: Literal["recent", "evidence_count", "confidence"] = "recent",
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[RelationshipRead]:
     await _require_investigation(investigation_id, session)
     items = await RelationshipRepository(session).list_by_investigation(
-        investigation_id, limit=limit, offset=offset
+        investigation_id,
+        limit=limit,
+        offset=offset,
+        relationship_type=relationship_type,
+        relationship_status=relationship_status,
+        entity_id=entity_id,
+        sort=sort,
     )
     return [relationship_read(relationship, count) for relationship, count in items]
 
@@ -269,31 +434,30 @@ async def list_investigation_relationships(
 async def list_investigation_relationship_candidates(
     investigation_id: UUID,
     session: Session,
+    candidate_status: RelationshipCandidateStatus | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[RelationshipCandidateRead]:
     await _require_investigation(investigation_id, session)
-    items = await RelationshipCandidateRepository(session).list_by_investigation(
-        investigation_id, limit=limit, offset=offset
-    )
-    return [
-        RelationshipCandidateRead(
-            id=item.id,
-            investigation_id=item.investigation_id,
-            document_id=item.document_id,
-            source_entity=RelationshipEntitySummary.model_validate(item.source_entity),
-            target_entity=RelationshipEntitySummary.model_validate(item.target_entity),
-            type=item.type,
-            claim_kind=item.claim_kind,
-            confidence=item.confidence,
-            score=item.score,
-            status=item.status,
-            extraction_method=item.extraction_method,
-            signals=item.signals,
-            temporal_start=item.temporal_start,
-            temporal_end=item.temporal_end,
-            evidence_preview=item.supporting_text,
-            created_at=item.created_at,
+    statement = (
+        select(RelationshipCandidate, Source)
+        .join(Document, Document.id == RelationshipCandidate.document_id)
+        .join(Source, Source.id == Document.source_id)
+        .options(
+            selectinload(RelationshipCandidate.source_entity),
+            selectinload(RelationshipCandidate.target_entity),
         )
-        for item in items
-    ]
+        .where(RelationshipCandidate.investigation_id == investigation_id)
+    )
+    if candidate_status:
+        statement = statement.where(RelationshipCandidate.status == candidate_status)
+    rows = (
+        await session.execute(
+            statement.order_by(
+                RelationshipCandidate.created_at.desc(), RelationshipCandidate.id.desc()
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+    return [candidate_read(item, source) for item, source in rows]

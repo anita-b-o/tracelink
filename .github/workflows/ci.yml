@@ -89,6 +89,45 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  workspace-e2e:
+    runs-on: ubuntu-latest
+    env:
+      FRONTEND_PORT: 3100
+      BACKEND_PORT: 8100
+      POSTGRES_PORT: 55432
+      REDIS_PORT: 56379
+      POSTGRES_DB: tracelink_e2e
+      POSTGRES_PASSWORD: tracelink_e2e
+      PLAYWRIGHT_BASE_URL: http://localhost:3100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+      - run: npm install --global npm@11.6.2
+      - run: npm ci
+        working-directory: apps/frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/frontend
+      - name: Start isolated workspace stack
+        run: >-
+          docker compose -p tracelink-e2e -f compose.yaml -f compose.e2e.yaml
+          up --build --detach --wait postgres redis backend worker frontend
+      - name: Seed review fixture
+        run: >-
+          docker compose -p tracelink-e2e -f compose.yaml -f compose.e2e.yaml
+          run --rm e2e-fixtures
+      - run: npm run test:e2e
+        working-directory: apps/frontend
+      - name: Show E2E logs on failure
+        if: failure()
+        run: docker compose -p tracelink-e2e -f compose.yaml -f compose.e2e.yaml logs --no-color
+      - name: Stop isolated stack
+        if: always()
+        run: docker compose -p tracelink-e2e -f compose.yaml -f compose.e2e.yaml down --volumes
+
   compose-smoke:
     runs-on: ubuntu-latest
     steps:

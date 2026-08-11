@@ -2,16 +2,17 @@
 
 ## Estado actual
 
-La Fase 5 conserva el monorepo Docker-first y el backend como monolito modular. El workflow de
+La Fase 7 conserva el monorepo Docker-first y el backend como monolito modular. El workflow de
 Investigation ejecuta connectors públicos, persiste Sources/Documents y encadena extracción y
 resolución de entidades con extracción/validación de relaciones en jobs Celery separados. El
-frontend sigue limitado al estado de servicios.
+frontend ofrece dashboard y workspace evidence-first con tablas paginadas, timeline, React Flow,
+Ask/reportes grounded y review candidato-específico.
 
 ```text
 Navegador
    │
    ├── Next.js :3000
-   │      └── consulta de disponibilidad
+   │      └── TanStack Query ── workspace / graph / review
    │
    └── FastAPI :8000
           ├── PostgreSQL 17 + pgvector (estado y resultados)
@@ -53,7 +54,7 @@ worker son JSON, incorporan IDs de correlación y no incluyen la consulta origin
 
 ## Decisiones diferidas
 
-Permisos, Findings automáticos, graph UI y despliegue continúan diferidos. OpenAI es sólo un
+Permisos, Findings automáticos y despliegue continúan diferidos. OpenAI es sólo un
 adaptador opt-in; fake providers mantienen operación y tests herméticos. Vector search permanece
 exacta hasta que volumen o latencia justifiquen ANN.
 

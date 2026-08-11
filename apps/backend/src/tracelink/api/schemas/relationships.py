@@ -3,6 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
+from tracelink.api.schemas.sources import SourceSummaryRead
 from tracelink.domain.enums import (
     AssertionStatus,
     EntityType,
@@ -51,7 +52,10 @@ class RelationshipCandidateRead(BaseModel):
     temporal_start: str | None
     temporal_end: str | None
     evidence_preview: str | None
+    reason_codes: list[str] = Field(default_factory=list)
+    source: SourceSummaryRead | None = None
     created_at: datetime
+    reviewed_at: datetime | None = None
 
 
 class RelationshipEvidenceRead(BaseModel):
@@ -66,5 +70,36 @@ class RelationshipEvidenceRead(BaseModel):
     end_offset: int | None
     locator: str | None
     preview: str | None
+    source: SourceSummaryRead | None = None
+    document_title: str | None = None
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
     created_at: datetime
+
+
+class RelationshipDetailRead(RelationshipRead):
+    claims: list[RelationshipCandidateRead]
+    evidence: list[RelationshipEvidenceRead]
+
+
+class GraphNodeRead(BaseModel):
+    id: UUID
+    type: EntityType
+    label: str
+    mention_count: int
+
+
+class GraphEdgeRead(BaseModel):
+    id: UUID
+    source: UUID
+    target: UUID
+    type: RelationshipType
+    status: AssertionStatus
+    confidence: float
+    evidence_count: int
+
+
+class InvestigationGraphRead(BaseModel):
+    nodes: list[GraphNodeRead]
+    edges: list[GraphEdgeRead]
+    truncated: bool
+    total_nodes: int

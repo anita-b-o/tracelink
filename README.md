@@ -4,9 +4,9 @@ TraceLink será un sistema web de investigación OSINT asistida por IA para due 
 empresas y personas. Su principio central es que cada entidad, relación y conclusión debe poder
 rastrearse hasta evidencia pública o aportada legalmente por el usuario.
 
-El repositorio contiene la **Fase 4**: core domain, workflow asíncrono, research connectors y
-extracción/resolución de entidades trazable. Todavía no incluye usuarios, relationships derivadas,
-RAG, embeddings funcionales ni LLM productivo.
+El repositorio contiene la **Fase 7**: dominio y workflow asíncrono, connectors, extracción y
+resolución de entidades/relaciones, RAG/reportes grounded y un workspace completo. Incluye grafo,
+timeline y review humano; todavía no incluye autenticación, multi-user ni deploy.
 
 ## Arquitectura actual
 
@@ -15,7 +15,7 @@ El proyecto es un monorepo con un monolito modular como backend:
 ```text
 apps/
   backend/       FastAPI, SQLAlchemy, Alembic y Celery
-  frontend/      Next.js, React, TypeScript y Tailwind
+  frontend/      Next.js, React, TypeScript, Tailwind, TanStack Query y React Flow
 infra/docker/    Imágenes de desarrollo y producción
 docs/            Decisiones de arquitectura
 compose.yaml     Stack local completo
@@ -93,7 +93,8 @@ Los valores predeterminados del backend apuntan a los puertos locales de Postgre
 | `POSTGRES_DB` | Base de datos local | `tracelink` |
 | `POSTGRES_USER` | Usuario local | `tracelink` |
 | `POSTGRES_PASSWORD` | Contraseña local | `tracelink_dev` |
-| `NEXT_PUBLIC_API_URL` | URL del API visible para el navegador | `http://localhost:8000` |
+| `NEXT_PUBLIC_API_BASE_URL` | URL del API visible para el navegador | `http://localhost:8000` |
+| `NEXT_PUBLIC_GRAPH_MAX_NODES` | Límite inicial de nodos React Flow | `250` |
 | `CORS_ORIGINS` | Orígenes permitidos, separados por coma | `http://localhost:3000` |
 | `LOG_LEVEL` | Nivel de logging del backend y worker | `INFO` |
 | `ENVIRONMENT` | Selección de composición (`test` usa search fake) | `development` |
@@ -138,6 +139,7 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+npm run test:e2e
 ```
 
 Validación integrada:
@@ -164,9 +166,10 @@ GitHub Actions ejecuta estos checks y un smoke test del stack. No realiza deploy
 - El workflow está documentado en
   [docs/investigation-workflow.md](docs/investigation-workflow.md).
 - No existe autenticación ni asociación de registros a usuarios.
-- Celery enruta research a connectors y procesa Documents en un job separado de entity extraction.
-- pgvector y `embedding_records` están preparados, pero no hay generación ni búsqueda vectorial.
-- No hay relationships derivadas, IA productiva, RAG ni datos falsos en el grafo.
+- Celery enruta research, entity/relationship processing, embeddings y reportes.
+- El workspace, review y graph UI se documentan en
+  [frontend-workspace.md](docs/frontend-workspace.md),
+  [review-workflow.md](docs/review-workflow.md) y [graph-ui.md](docs/graph-ui.md).
 
 Consultá [la arquitectura](docs/architecture.md) para los límites definidos para las próximas
 fases y [research-connectors.md](docs/research-connectors.md) para seguridad y operación.
