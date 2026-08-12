@@ -131,10 +131,12 @@ services:
     name: tracelink-redis
     ipAllowList: []
     plan: starter
+    maxmemoryPolicy: noeviction
 
 databases:
   - name: tracelink-postgres
     plan: basic-256mb
+    ipAllowList: []
     databaseName: tracelink
     user: tracelink
     postgresMajorVersion: "17"
