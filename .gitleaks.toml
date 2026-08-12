@@ -1,0 +1,12 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated dependencies, build output, caches, and local VCS metadata"
+paths = [
+  '''(^|/)\.git/''',
+  '''(^|/)\.next/''',
+  '''(^|/)node_modules/''',
+  '''(^|/)\.venv/''',
+  '''(^|/)(\.mypy_cache|\.pytest_cache|\.ruff_cache|__pycache__|coverage|test-results)/''',
+]

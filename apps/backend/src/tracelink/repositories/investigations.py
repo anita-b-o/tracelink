@@ -6,18 +6,40 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tracelink.core.config import get_settings
 from tracelink.domain.enums import InvestigationStatus
-from tracelink.domain.models import Investigation
+from tracelink.domain.models import Investigation, User
 from tracelink.domain.normalization import clean_text
 from tracelink.domain.validation import require_non_empty
+from tracelink.services.auth import normalize_email, password_hash
 
 
 class InvestigationRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def create(self, title: str, original_query: str) -> Investigation:
+    async def create(
+        self, title: str, original_query: str, *, user_id: UUID | None = None
+    ) -> Investigation:
+        if user_id is None:
+            settings = get_settings()
+            if settings.app_env not in {"development", "test"}:
+                raise ValueError("user_id is required outside development/test")
+            email = normalize_email(settings.dev_bootstrap_email)
+            user = await self.session.scalar(select(User).where(User.email == email))
+            if user is None:
+                user = User(
+                    email=email,
+                    password_hash=password_hash.hash(
+                        settings.dev_bootstrap_password.get_secret_value()
+                    ),
+                    is_active=True,
+                )
+                self.session.add(user)
+                await self.session.flush()
+            user_id = user.id
         investigation = Investigation(
+            user_id=user_id,
             title=require_non_empty(clean_text(title), "title"),
             original_query=require_non_empty(original_query.strip(), "original_query"),
             status=InvestigationStatus.DRAFT,
@@ -27,8 +49,13 @@ class InvestigationRepository:
         await self.session.refresh(investigation)
         return investigation
 
-    async def get_by_id(self, investigation_id: UUID) -> Investigation | None:
-        return await self.session.get(Investigation, investigation_id)
+    async def get_by_id(
+        self, investigation_id: UUID, *, user_id: UUID | None = None
+    ) -> Investigation | None:
+        statement = select(Investigation).where(Investigation.id == investigation_id)
+        if user_id is not None:
+            statement = statement.where(Investigation.user_id == user_id)
+        return cast(Investigation | None, await self.session.scalar(statement))
 
     async def get_by_id_for_update(self, investigation_id: UUID) -> Investigation | None:
         return cast(
@@ -38,10 +65,14 @@ class InvestigationRepository:
             ),
         )
 
-    async def list(self, *, limit: int = 50, offset: int = 0) -> list[Investigation]:
+    async def list(
+        self, *, user_id: UUID | None = None, limit: int = 50, offset: int = 0
+    ) -> list[Investigation]:
+        statement = select(Investigation)
+        if user_id is not None:
+            statement = statement.where(Investigation.user_id == user_id)
         result = await self.session.scalars(
-            select(Investigation)
-            .order_by(Investigation.created_at.desc(), Investigation.id.desc())
+            statement.order_by(Investigation.created_at.desc(), Investigation.id.desc())
             .limit(limit)
             .offset(offset)
         )

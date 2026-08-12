@@ -1,7 +1,35 @@
 import type { Answer, DocumentDetail, DocumentSummary, Entity, EntityCandidate, Evidence, GraphData, Investigation, Mention, Progress, Relationship, RelationshipCandidate, RelationshipDetail, Report, ReportSummary, ReportType, SearchHit, Source, Task } from "./types";
 
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
 const DEFAULT_TIMEOUT_MS = 15_000;
+let refreshPromise: Promise<boolean> | null = null;
+
+function cookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const prefix = `${name}=`;
+  const item = document.cookie.split("; ").find((value) => value.startsWith(prefix));
+  return item ? decodeURIComponent(item.slice(prefix.length)) : null;
+}
+
+async function csrfToken(): Promise<string> {
+  const existing = cookie("tracelink_csrf");
+  if (existing) return existing;
+  const response = await fetch("/api/auth/csrf", { credentials: "same-origin", cache: "no-store" });
+  if (!response.ok) throw new ApiError("Could not initialize a secure session.", response.status, "http");
+  const payload = await response.json() as { csrf_token: string };
+  return payload.csrf_token;
+}
+
+async function refreshSession(): Promise<boolean> {
+  if (!refreshPromise) refreshPromise = (async () => {
+    try {
+      const csrf = await csrfToken();
+      const response = await fetch("/api/auth/refresh", { method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": csrf } });
+      return response.ok;
+    } catch { return false; }
+    finally { refreshPromise = null; }
+  })();
+  return refreshPromise;
+}
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number | null, public readonly kind: "http" | "network" | "timeout" | "malformed", public readonly fieldErrors: string[] = []) {
@@ -20,16 +48,24 @@ function validationMessages(detail: unknown): string[] {
   });
 }
 
-export async function apiRequest<T>(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
+export async function apiRequest<T>(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS, allowRefresh = true): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("timeout"), timeoutMs);
   try {
     let response: Response;
     try {
-      response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers: { "Content-Type": "application/json", ...init.headers }, signal: controller.signal });
+      const headers = new Headers(init.headers);
+      if (init.body) headers.set("Content-Type", "application/json");
+      if (init.method && !["GET", "HEAD"].includes(init.method.toUpperCase())) headers.set("X-CSRF-Token", await csrfToken());
+      response = await fetch(path, { ...init, credentials: "same-origin", headers, signal: controller.signal });
     } catch {
       if (controller.signal.aborted) throw new ApiError(`The TraceLink API did not respond within ${Math.round(timeoutMs / 1000)} seconds.`, null, "timeout");
-      throw new ApiError(`Cannot reach the TraceLink API at ${API_BASE_URL}.`, null, "network");
+      throw new ApiError("Cannot reach the TraceLink API.", null, "network");
+    }
+    if (response.status === 401 && allowRefresh && !path.startsWith("/api/auth/")) {
+      if (await refreshSession()) return apiRequest<T>(path, init, timeoutMs, false);
+      if (typeof window !== "undefined") window.dispatchEvent(new Event("tracelink:session-expired"));
+      throw new ApiError("Your session expired. Sign in again; the operation was not saved.", 401, "http");
     }
     let payload: unknown = null;
     if (response.status !== 204) {

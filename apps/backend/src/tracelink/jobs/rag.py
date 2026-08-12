@@ -12,6 +12,7 @@ from tracelink.services.embedding_providers import (
     TransientEmbeddingProviderError,
     get_embedding_provider,
 )
+from tracelink.services.ownership import require_owned_investigation
 from tracelink.services.retrieval_indexing import RetrievalIndexingService
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 async def index_document_for_retrieval_async(investigation_id: UUID, document_id: UUID) -> None:
     settings = get_settings()
     async with get_session_factory()() as session, session.begin():
+        await require_owned_investigation(session, investigation_id)
         await RetrievalIndexingService(session, settings, get_embedding_provider(settings)).index(
             investigation_id, document_id
         )

@@ -13,9 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from tracelink.core.config import get_settings
 from tracelink.infrastructure.database import close_database, get_session_factory
+from tracelink.infrastructure.redis import clear_redis_clients
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 TABLES = (
+    "outbox_events",
+    "audit_events",
+    "auth_sessions",
     "investigation_reports",
     "embedding_records",
     "retrieval_chunks",
@@ -32,6 +36,7 @@ TABLES = (
     "sources",
     "entities",
     "investigations",
+    "users",
 )
 
 
@@ -82,6 +87,7 @@ async def migrated_database_url() -> AsyncIterator[str]:
 @pytest_asyncio.fixture
 async def db_session(migrated_database_url: str) -> AsyncIterator[AsyncSession]:
     _ = migrated_database_url
+    clear_redis_clients()
     async with get_session_factory()() as session:
         yield session
         await session.rollback()

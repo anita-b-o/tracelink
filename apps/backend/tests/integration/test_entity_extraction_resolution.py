@@ -146,8 +146,29 @@ async def test_exact_alias_resolves_and_duplicate_alias_is_not_added(
         canonical_name="Acme Holdings",
         aliases=["AH"],
     )
+    investigation_id, seed_document_id = await add_document(
+        db_session, "Acme Holdings", url_suffix="alias-seed"
+    )
+    db_session.add(
+        EntityMention(
+            investigation_id=investigation_id,
+            document_id=seed_document_id,
+            entity_id=entity.id,
+            entity_type=EntityType.COMPANY,
+            surface_form="Acme Holdings",
+            normalized_form="acme holdings",
+            start_offset=0,
+            end_offset=13,
+            extraction_method="fixture",
+            confidence=1.0,
+            fingerprint="a" * 64,
+        )
+    )
+    await db_session.flush()
     text = "AH"
-    investigation_id, document_id = await add_document(db_session, text)
+    _, document_id = await add_document(
+        db_session, text, investigation_id=investigation_id, url_suffix="alias-target"
+    )
     provider = FakeEntityExtractionProvider(
         {
             text: [

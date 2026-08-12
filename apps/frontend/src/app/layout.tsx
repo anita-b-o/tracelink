@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import type { ReactNode } from "react";
-import Link from "next/link";
-import { Network } from "lucide-react";
+import { Suspense, type ReactNode } from "react";
 
+import { AppHeader } from "@/components/app-header";
+import { AuthProvider } from "@/components/auth-provider";
 import { QueryProvider } from "@/components/query-provider";
 import "./globals.css";
 
@@ -16,11 +16,12 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
     <html lang="en">
       <body>
         <QueryProvider>
-          <header className="app-bar">
-            <Link href="/" className="brand"><span className="brand-mark"><Network size={18} /></span><span>TraceLink</span></Link>
-            <nav aria-label="Primary navigation"><Link href="/">Investigations</Link><Link href="/investigations/new" className="button small">New investigation</Link></nav>
-          </header>
-          {children}
+          <Suspense fallback={<main className="auth-shell"><p>Checking session…</p></main>}>
+            <AuthProvider>
+              <AppHeader />
+              {children}
+            </AuthProvider>
+          </Suspense>
         </QueryProvider>
       </body>
     </html>

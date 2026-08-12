@@ -11,15 +11,33 @@ from tracelink.infrastructure.database import get_session_factory
 from tracelink.jobs.async_runtime import async_worker_runtime
 from tracelink.jobs.celery_app import celery_app
 from tracelink.services.document_entity_processing import DocumentEntityProcessingService
+from tracelink.services.outbox import enqueue_task
+from tracelink.services.ownership import require_owned_investigation
 
 logger = logging.getLogger(__name__)
 
 
-async def process_document_entities_async(investigation_id: UUID, document_id: UUID) -> bool:
+async def process_document_entities_async(
+    investigation_id: UUID, document_id: UUID, downstream_queue: str | None = None
+) -> bool:
     settings = get_settings()
     async with get_session_factory()() as session, session.begin():
+        await require_owned_investigation(session, investigation_id)
         mentions = await DocumentEntityProcessingService(session, settings).process(
             investigation_id, document_id
+        )
+        should_process_relationships = (
+            len({mention.entity_id for mention in mentions if mention.entity_id is not None}) >= 2
+        )
+        await enqueue_task(
+            session,
+            (
+                "tracelink.process_document_relationships"
+                if should_process_relationships
+                else "tracelink.index_document_for_retrieval"
+            ),
+            [str(investigation_id), str(document_id)],
+            queue=downstream_queue,
         )
     logger.info(
         "document entity extraction completed",
@@ -30,7 +48,7 @@ async def process_document_entities_async(investigation_id: UUID, document_id: U
             "mention_count": len(mentions),
         },
     )
-    return len({mention.entity_id for mention in mentions if mention.entity_id is not None}) >= 2
+    return should_process_relationships
 
 
 @celery_app.task(  # type: ignore[untyped-decorator]
@@ -46,27 +64,15 @@ def process_document_entities(
     document_id: str,
 ) -> None:
     try:
-        should_process_relationships = async_worker_runtime.run(
-            process_document_entities_async(UUID(investigation_id), UUID(document_id))
+        delivery_info = self.request.delivery_info or {}
+        routing_key = delivery_info.get("routing_key")
+        async_worker_runtime.run(
+            process_document_entities_async(
+                UUID(investigation_id),
+                UUID(document_id),
+                str(routing_key) if routing_key else None,
+            )
         )
-        if should_process_relationships:
-            from tracelink.jobs.relationships import process_document_relationships
-
-            delivery_info = self.request.delivery_info or {}
-            routing_key = delivery_info.get("routing_key")
-            options = {"queue": routing_key} if routing_key else {}
-            process_document_relationships.apply_async(
-                args=[investigation_id, document_id], **options
-            )
-        else:
-            from tracelink.jobs.rag import index_document_for_retrieval
-
-            delivery_info = self.request.delivery_info or {}
-            routing_key = delivery_info.get("routing_key")
-            options = {"queue": routing_key} if routing_key else {}
-            index_document_for_retrieval.apply_async(
-                args=[investigation_id, document_id], **options
-            )
     except (OperationalError, KombuOperationalError, EntityExtractionProviderError) as exc:
         settings = get_settings()
         raise self.retry(

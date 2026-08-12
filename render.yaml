@@ -1,0 +1,140 @@
+services:
+  - type: web
+    name: tracelink-web
+    runtime: docker
+    dockerfilePath: ./infra/docker/frontend.Dockerfile
+    dockerContext: .
+    dockerCommand: node server.js
+    autoDeployTrigger: off
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: BACKEND_INTERNAL_URL
+        sync: false
+  - type: pserv
+    name: tracelink-api
+    runtime: docker
+    dockerfilePath: ./infra/docker/backend.Dockerfile
+    dockerContext: .
+    autoDeployTrigger: off
+    preDeployCommand: alembic upgrade head
+    healthCheckPath: /api/health/ready
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tracelink-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: tracelink-redis
+          property: connectionString
+      - key: AUTH_JWT_SECRET
+        sync: false
+      - key: AUTH_TOKEN_PEPPER
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: REGISTRATION_ENABLED
+        sync: false
+      - key: METRICS_BEARER_TOKEN
+        sync: false
+      - key: EMBEDDING_PROVIDER
+        value: openai
+      - key: LLM_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+  - type: worker
+    name: tracelink-worker
+    runtime: docker
+    dockerfilePath: ./infra/docker/backend.Dockerfile
+    dockerContext: .
+    dockerCommand: celery --app tracelink.jobs.celery_app:celery_app worker --loglevel=INFO
+    autoDeployTrigger: off
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tracelink-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService: {type: keyvalue, name: tracelink-redis, property: connectionString}
+      - key: CELERY_BROKER_URL
+        fromService: {type: keyvalue, name: tracelink-redis, property: connectionString}
+      - key: CELERY_RESULT_BACKEND
+        fromService: {type: keyvalue, name: tracelink-redis, property: connectionString}
+      - key: AUTH_JWT_SECRET
+        sync: false
+      - key: AUTH_TOKEN_PEPPER
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: REGISTRATION_ENABLED
+        sync: false
+      - key: EMBEDDING_PROVIDER
+        value: openai
+      - key: LLM_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+  - type: worker
+    name: tracelink-outbox
+    runtime: docker
+    dockerfilePath: ./infra/docker/backend.Dockerfile
+    dockerContext: .
+    dockerCommand: python -m tracelink.outbox_dispatcher
+    autoDeployTrigger: off
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tracelink-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService: {type: keyvalue, name: tracelink-redis, property: connectionString}
+      - key: CELERY_BROKER_URL
+        fromService: {type: keyvalue, name: tracelink-redis, property: connectionString}
+      - key: CELERY_RESULT_BACKEND
+        fromService: {type: keyvalue, name: tracelink-redis, property: connectionString}
+      - key: AUTH_JWT_SECRET
+        sync: false
+      - key: AUTH_TOKEN_PEPPER
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: REGISTRATION_ENABLED
+        sync: false
+      - key: EMBEDDING_PROVIDER
+        value: openai
+      - key: LLM_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+  - type: keyvalue
+    name: tracelink-redis
+    ipAllowList: []
+    plan: starter
+
+databases:
+  - name: tracelink-postgres
+    plan: basic-256mb
+    databaseName: tracelink
+    user: tracelink
+    postgresMajorVersion: "17"

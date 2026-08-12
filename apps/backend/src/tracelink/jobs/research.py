@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import Any
 from uuid import UUID
@@ -15,12 +14,15 @@ from tracelink.domain.enums import FakeResearchMode
 from tracelink.infrastructure.database import get_session_factory
 from tracelink.jobs.async_runtime import async_worker_runtime
 from tracelink.jobs.celery_app import celery_app
+from tracelink.observability.metrics import CONNECTOR_FAILURES
 from tracelink.services.fake_research import (
     FakeResearchCancelled,
     FakeResearchError,
     FakeResearchExecutor,
 )
 from tracelink.services.investigation_workflow import InvestigationWorkflowService
+from tracelink.services.outbox import enqueue_task
+from tracelink.services.ownership import require_owned_investigation
 from tracelink.services.research_execution import ConnectorResearchExecutor
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,8 @@ async def execute_research_task_async(
         task = await InvestigationWorkflowService(session, settings).claim(
             research_task_id, celery_task_id
         )
+        if task is not None:
+            await require_owned_investigation(session, task.investigation_id)
     if task is None:
         logger.info(
             "research task delivery ignored",
@@ -105,6 +109,7 @@ async def execute_research_task_async(
             )
         logger.warning("research task failed", extra={**context, "status": "FAILED"})
     except ConnectorError as exc:
+        CONNECTOR_FAILURES.labels(connector_name, exc.code).inc()
         async with session_factory() as session, session.begin():
             await InvestigationWorkflowService(session, settings).fail(
                 research_task_id,
@@ -153,19 +158,18 @@ async def execute_research_task_async(
                 persisted_result = await workflow.complete_with_output(
                     research_task_id, celery_task_id, output
                 )
+                assert persisted_result is not None
+                for document_id in persisted_result.document_ids:
+                    await enqueue_task(
+                        session,
+                        "tracelink.process_document_entities",
+                        [str(task.investigation_id), str(document_id)],
+                        queue=downstream_queue,
+                    )
             else:
                 assert result is not None
                 await workflow.complete(research_task_id, celery_task_id, result)
         logger.info("research task completed", extra={**context, "status": "COMPLETED"})
-        if persisted_result is not None:
-            from tracelink.jobs.entities import process_document_entities
-
-            for document_id in persisted_result.document_ids:
-                await asyncio.to_thread(
-                    process_document_entities.apply_async,
-                    args=[str(task.investigation_id), str(document_id)],
-                    **({"queue": downstream_queue} if downstream_queue else {}),
-                )
 
 
 @celery_app.task(  # type: ignore[untyped-decorator]

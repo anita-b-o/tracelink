@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tracelink.core.config import Settings
 from tracelink.domain.rag import RetrievalFilters, RetrievalHit
+from tracelink.observability.metrics import EMBEDDING_BATCHES
 from tracelink.services.embedding_providers import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,12 @@ class HybridRetriever:
     ) -> list[RetrievalHit]:
         selected_filters = filters or RetrievalFilters()
         selected_top_k = min(top_k or self.settings.rag_top_k, 50)
-        vectors = await self.provider.embed_texts([query])
+        try:
+            vectors = await self.provider.embed_texts([query])
+        except Exception:
+            EMBEDDING_BATCHES.labels(self.provider.provider_name, "failure").inc()
+            raise
+        EMBEDDING_BATCHES.labels(self.provider.provider_name, "success").inc()
         if len(vectors) != 1 or len(vectors[0]) != self.provider.dimensions:
             raise ValueError("embedding provider returned an incompatible query vector")
 
@@ -104,8 +110,9 @@ class HybridRetriever:
             )
             parameters["relationship_types"] = list(selected_filters.relationship_types)
 
-        statement = text(
-            f"""
+        # Every interpolated clause above is a fixed server-side SQL fragment; all
+        # user-controlled values remain bound parameters.
+        sql_template = """
             WITH scored AS (
                 SELECT
                     rc.id AS chunk_id,
@@ -157,7 +164,7 @@ class HybridRetriever:
                 JOIN sources s ON s.id = d.source_id
                 JOIN investigation_artifacts ia
                   ON ia.document_id = d.id AND ia.source_id = s.id
-                WHERE {" AND ".join(clauses)}
+                WHERE __FILTERS__
             )
             SELECT *, LEAST(
                 1.0,
@@ -169,6 +176,9 @@ class HybridRetriever:
             ORDER BY combined_score DESC, semantic_score DESC, lexical_score DESC, chunk_id
             LIMIT :top_k
             """
+        # The replacement values are fixed server-side fragments, never user input.
+        statement = text(  # nosec B608
+            sql_template.replace("__FILTERS__", " AND ".join(clauses))
         )
         rows = (await self.session.execute(statement, parameters)).mappings().all()
         hits = [

@@ -1,12 +1,14 @@
-import asyncio
 from typing import Annotated, Literal, NoReturn
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from tracelink.api.authorization import AuthorizationService
+from tracelink.api.dependencies import CurrentUser
+from tracelink.api.rate_limit import RatePolicy, enforce_rate_limit
 from tracelink.api.routes.relationships import relationship_read
 from tracelink.api.routes.workspace import candidate_read, source_summary
 from tracelink.api.schemas.entities import (
@@ -40,7 +42,6 @@ from tracelink.domain.enums import (
     AssertionStatus,
     EntityResolutionCandidateStatus,
     EntityType,
-    FakeResearchMode,
     RelationshipCandidateStatus,
     RelationshipType,
 )
@@ -53,21 +54,17 @@ from tracelink.domain.models import (
     Source,
 )
 from tracelink.infrastructure.database import get_session
-from tracelink.jobs.dispatcher import (
-    DispatchError,
-    ResearchTaskDispatcher,
-    get_research_task_dispatcher,
-)
 from tracelink.repositories.investigations import InvestigationRepository
 from tracelink.repositories.relationships import RelationshipRepository
+from tracelink.services.audit import AuditService
 from tracelink.services.errors import DomainConflictError, DomainNotFoundError
 from tracelink.services.investigation_workflow import InvestigationWorkflowService
+from tracelink.services.outbox import enqueue_task
 from tracelink.services.research_artifacts import ResearchArtifactService
 from tracelink.services.workspace import investigation_summaries
 
 router = APIRouter()
 Session = Annotated[AsyncSession, Depends(get_session)]
-Dispatcher = Annotated[ResearchTaskDispatcher, Depends(get_research_task_dispatcher)]
 Connectors = Annotated[ConnectorRegistry, Depends(get_connector_registry)]
 
 
@@ -98,25 +95,34 @@ def raise_connector_http_error(exc: ConnectorError) -> NoReturn:
 
 
 @router.post("", response_model=InvestigationRead, status_code=status.HTTP_201_CREATED)
-async def create_investigation(payload: InvestigationCreate, session: Session) -> object:
-    return await InvestigationRepository(session).create(payload.title, payload.original_query)
+async def create_investigation(
+    payload: InvestigationCreate, session: Session, current_user: CurrentUser
+) -> object:
+    return await InvestigationRepository(session).create(
+        payload.title, payload.original_query, user_id=current_user.id
+    )
 
 
 @router.get("", response_model=list[InvestigationSummaryRead])
 async def list_investigations(
     session: Session,
+    current_user: CurrentUser,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> object:
-    items = await InvestigationRepository(session).list(limit=limit, offset=offset)
+    items = await InvestigationRepository(session).list(
+        user_id=current_user.id, limit=limit, offset=offset
+    )
     return await investigation_summaries(session, items)
 
 
 @router.get("/{investigation_id}", response_model=InvestigationSummaryRead)
-async def get_investigation(investigation_id: UUID, session: Session) -> object:
-    investigation = await InvestigationRepository(session).get_by_id(investigation_id)
-    if investigation is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="investigation not found")
+async def get_investigation(
+    investigation_id: UUID, session: Session, current_user: CurrentUser
+) -> object:
+    investigation = await AuthorizationService(session, current_user.id).investigation(
+        investigation_id
+    )
     return (await investigation_summaries(session, [investigation]))[0]
 
 
@@ -130,9 +136,16 @@ async def ingest_investigation_url(
     payload: UrlIngestionCreate,
     session: Session,
     connectors: Connectors,
+    current_user: CurrentUser,
+    request: Request,
 ) -> object:
-    if await InvestigationRepository(session).get_by_id(investigation_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="investigation not found")
+    await AuthorizationService(session, current_user.id).investigation(investigation_id)
+    settings = get_settings()
+    await enforce_rate_limit(
+        request,
+        RatePolicy("url_ingestion", settings.rate_limit_url_ingestion_count, 3600),
+        str(current_user.id),
+    )
     await session.commit()
     connector = connectors.get_connector("url_ingestion")
     try:
@@ -142,17 +155,15 @@ async def ingest_investigation_url(
         )
     except ConnectorError as exc:
         raise_connector_http_error(exc)
-    if await InvestigationRepository(session).get_by_id(investigation_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="investigation not found")
+    await AuthorizationService(session, current_user.id).investigation(investigation_id)
     result = await ResearchArtifactService(session).persist(investigation_id, output)
-    await session.commit()
-    from tracelink.jobs.entities import process_document_entities
-
     for document_id in result.document_ids:
-        await asyncio.to_thread(
-            process_document_entities.apply_async,
-            args=[str(investigation_id), str(document_id)],
+        await enqueue_task(
+            session,
+            "tracelink.process_document_entities",
+            [str(investigation_id), str(document_id)],
         )
+    await session.commit()
     return result
 
 
@@ -162,39 +173,51 @@ async def ingest_investigation_url(
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def start_investigation(
-    investigation_id: UUID, session: Session, dispatcher: Dispatcher
+    investigation_id: UUID,
+    session: Session,
+    current_user: CurrentUser,
+    request: Request,
 ) -> object:
+    await AuthorizationService(session, current_user.id).investigation(investigation_id)
     settings = get_settings()
+    await enforce_rate_limit(
+        request,
+        RatePolicy("investigation_start", settings.rate_limit_start_count, 3600),
+        str(current_user.id),
+    )
     try:
         result = await InvestigationWorkflowService(session, settings).start(investigation_id)
+        for research_task_id in result.pending_task_ids:
+            await enqueue_task(
+                session,
+                "tracelink.execute_research_task",
+                [
+                    str(research_task_id),
+                    settings.fake_research_mode,
+                ],
+            )
         await session.commit()
         await session.refresh(result.investigation)
         response = InvestigationRead.model_validate(result.investigation)
     except (DomainNotFoundError, DomainConflictError) as exc:
         raise_workflow_http_error(exc)
-    try:
-        for research_task_id in result.pending_task_ids:
-            await dispatcher.dispatch(
-                research_task_id,
-                mode=(
-                    FakeResearchMode(settings.fake_research_mode)
-                    if settings.fake_research_mode
-                    else None
-                ),
-            )
-    except DispatchError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="research tasks could not be queued; retry start",
-        ) from exc
     return response
 
 
 @router.post("/{investigation_id}/cancel", response_model=InvestigationRead)
-async def cancel_investigation(investigation_id: UUID, session: Session) -> object:
+async def cancel_investigation(
+    investigation_id: UUID, session: Session, current_user: CurrentUser
+) -> object:
+    await AuthorizationService(session, current_user.id).investigation(investigation_id)
     try:
         investigation = await InvestigationWorkflowService(session, get_settings()).cancel(
             investigation_id
+        )
+        await AuditService(session).record(
+            user_id=current_user.id,
+            action="investigation.cancel",
+            resource_type="investigation",
+            resource_id=investigation_id,
         )
         await session.commit()
         await session.refresh(investigation)
@@ -204,7 +227,10 @@ async def cancel_investigation(investigation_id: UUID, session: Session) -> obje
 
 
 @router.get("/{investigation_id}/tasks", response_model=list[ResearchTaskRead])
-async def list_research_tasks(investigation_id: UUID, session: Session) -> object:
+async def list_research_tasks(
+    investigation_id: UUID, session: Session, current_user: CurrentUser
+) -> object:
+    await AuthorizationService(session, current_user.id).investigation(investigation_id)
     try:
         return await InvestigationWorkflowService(session, get_settings()).list_tasks(
             investigation_id
@@ -214,7 +240,10 @@ async def list_research_tasks(investigation_id: UUID, session: Session) -> objec
 
 
 @router.get("/{investigation_id}/progress", response_model=InvestigationProgressRead)
-async def get_investigation_progress(investigation_id: UUID, session: Session) -> object:
+async def get_investigation_progress(
+    investigation_id: UUID, session: Session, current_user: CurrentUser
+) -> object:
+    await AuthorizationService(session, current_user.id).investigation(investigation_id)
     try:
         return await InvestigationWorkflowService(session, get_settings()).progress(
             investigation_id
@@ -223,22 +252,24 @@ async def get_investigation_progress(investigation_id: UUID, session: Session) -
         raise_workflow_http_error(exc)
 
 
-async def _require_investigation(investigation_id: UUID, session: AsyncSession) -> None:
-    if await InvestigationRepository(session).get_by_id(investigation_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="investigation not found")
+async def _require_investigation(
+    investigation_id: UUID, session: AsyncSession, user_id: UUID
+) -> None:
+    await AuthorizationService(session, user_id).investigation(investigation_id)
 
 
 @router.get("/{investigation_id}/entities", response_model=list[InvestigationEntityRead])
 async def list_investigation_entities(
     investigation_id: UUID,
     session: Session,
+    current_user: CurrentUser,
     entity_type: EntityType | None = None,
-    q: str | None = None,
+    q: Annotated[str | None, Query(max_length=500)] = None,
     sort: Literal["recent", "mention_count"] = "recent",
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> object:
-    await _require_investigation(investigation_id, session)
+    await _require_investigation(investigation_id, session, current_user.id)
     count = func.count(EntityMention.id)
     statement = (
         select(Entity, count.label("mention_count"))
@@ -272,12 +303,13 @@ async def list_investigation_entities(
 async def list_investigation_entity_mentions(
     investigation_id: UUID,
     session: Session,
+    current_user: CurrentUser,
     entity_id: UUID | None = None,
     document_id: UUID | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> object:
-    await _require_investigation(investigation_id, session)
+    await _require_investigation(investigation_id, session, current_user.id)
     statement = (
         select(EntityMention, Document, Source)
         .join(Document, Document.id == EntityMention.document_id)
@@ -330,11 +362,12 @@ async def list_investigation_entity_mentions(
 async def list_investigation_resolution_candidates(
     investigation_id: UUID,
     session: Session,
+    current_user: CurrentUser,
     candidate_status: EntityResolutionCandidateStatus | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> object:
-    await _require_investigation(investigation_id, session)
+    await _require_investigation(investigation_id, session, current_user.id)
     statement = (
         select(EntityResolutionCandidate, EntityMention, Document, Source)
         .join(EntityMention, EntityMention.id == EntityResolutionCandidate.mention_id)
@@ -407,14 +440,15 @@ async def list_investigation_resolution_candidates(
 async def list_investigation_relationships(
     investigation_id: UUID,
     session: Session,
+    current_user: CurrentUser,
     relationship_type: RelationshipType | None = None,
     relationship_status: AssertionStatus | None = None,
     entity_id: UUID | None = None,
     sort: Literal["recent", "evidence_count", "confidence"] = "recent",
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> list[RelationshipRead]:
-    await _require_investigation(investigation_id, session)
+    await _require_investigation(investigation_id, session, current_user.id)
     items = await RelationshipRepository(session).list_by_investigation(
         investigation_id,
         limit=limit,
@@ -434,11 +468,12 @@ async def list_investigation_relationships(
 async def list_investigation_relationship_candidates(
     investigation_id: UUID,
     session: Session,
+    current_user: CurrentUser,
     candidate_status: RelationshipCandidateStatus | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> list[RelationshipCandidateRead]:
-    await _require_investigation(investigation_id, session)
+    await _require_investigation(investigation_id, session, current_user.id)
     statement = (
         select(RelationshipCandidate, Source)
         .join(Document, Document.id == RelationshipCandidate.document_id)

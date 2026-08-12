@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tracelink.core.config import Settings
 from tracelink.domain.models import RetrievalChunk
+from tracelink.observability.metrics import EMBEDDING_BATCHES
 from tracelink.repositories.documents import DocumentRepository
 from tracelink.repositories.investigation_artifacts import InvestigationArtifactRepository
 from tracelink.repositories.retrieval import RetrievalRepository
@@ -95,7 +96,14 @@ class RetrievalIndexingService:
             batch = missing[start : start + batch_size]
             uncached = [chunk for chunk in batch if chunk.content_hash not in cached]
             if uncached:
-                vectors = await self.provider.embed_texts([chunk.chunk_text for chunk in uncached])
+                try:
+                    vectors = await self.provider.embed_texts(
+                        [chunk.chunk_text for chunk in uncached]
+                    )
+                except Exception:
+                    EMBEDDING_BATCHES.labels(self.provider.provider_name, "failure").inc()
+                    raise
+                EMBEDDING_BATCHES.labels(self.provider.provider_name, "success").inc()
                 if len(vectors) != len(uncached):
                     raise ValueError("embedding provider returned a mismatched batch")
                 for chunk, vector in zip(uncached, vectors, strict=True):

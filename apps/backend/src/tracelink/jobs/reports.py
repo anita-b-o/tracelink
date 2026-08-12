@@ -8,6 +8,7 @@ from tracelink.core.config import get_settings
 from tracelink.infrastructure.database import get_session_factory
 from tracelink.jobs.async_runtime import async_worker_runtime
 from tracelink.jobs.celery_app import celery_app
+from tracelink.repositories.reports import InvestigationReportRepository
 from tracelink.services.embedding_providers import get_embedding_provider
 from tracelink.services.grounded_reports import InvestigationReportService
 from tracelink.services.hybrid_retrieval import HybridRetriever
@@ -15,6 +16,7 @@ from tracelink.services.llm_providers import (
     TransientLLMProviderError,
     get_llm_provider,
 )
+from tracelink.services.ownership import require_owned_investigation
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,10 @@ logger = logging.getLogger(__name__)
 async def generate_investigation_report_async(report_id: UUID, celery_task_id: str) -> None:
     settings = get_settings()
     async with get_session_factory()() as session, session.begin():
+        existing = await InvestigationReportRepository(session).get(report_id)
+        if existing is None:
+            return
+        await require_owned_investigation(session, existing.investigation_id)
         embeddings = get_embedding_provider(settings)
         llm = get_llm_provider(settings)
         report = await InvestigationReportService(

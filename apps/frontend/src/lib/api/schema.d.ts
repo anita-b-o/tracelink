@@ -38,6 +38,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/csrf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Csrf */
+        get: operations["csrf_api_auth_csrf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register */
+        post: operations["register_api_auth_register_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Login */
+        post: operations["login_api_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh */
+        post: operations["refresh_api_auth_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Logout */
+        post: operations["logout_api_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Me */
+        get: operations["me_api_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/investigations": {
         parameters: {
             query?: never;
@@ -362,23 +464,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/entities": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Entity */
-        post: operations["create_entity_api_entities_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/entities/{entity_id}": {
         parameters: {
             query?: never;
@@ -673,6 +758,11 @@ export interface components {
          * @enum {string}
          */
         ComponentStatus: "up" | "down";
+        /** CsrfResponse */
+        CsrfResponse: {
+            /** Csrf Token */
+            csrf_token: string;
+        };
         /** DocumentDetailRead */
         DocumentDetailRead: {
             /**
@@ -751,18 +841,6 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-        };
-        /** EntityCreate */
-        EntityCreate: {
-            type: components["schemas"]["EntityType"];
-            /** Canonical Name */
-            canonical_name: string;
-            /** Aliases */
-            aliases?: string[];
-            /** Metadata */
-            metadata?: {
-                [key: string]: components["schemas"]["JsonValue"];
-            };
         };
         /** EntityMentionDetailRead */
         EntityMentionDetailRead: {
@@ -1248,6 +1326,16 @@ export interface components {
              */
             service: "tracelink-api";
         };
+        /** LoginRequest */
+        LoginRequest: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /** Password */
+            password: string;
+        };
         /** ReadinessChecks */
         ReadinessChecks: {
             database: components["schemas"]["ComponentHealth"];
@@ -1261,6 +1349,18 @@ export interface components {
              */
             status: "ready" | "not_ready";
             checks: components["schemas"]["ReadinessChecks"];
+        };
+        /** RegisterRequest */
+        RegisterRequest: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /** Password */
+            password: string;
+            /** Display Name */
+            display_name?: string | null;
         };
         /** RelationshipCandidateRead */
         RelationshipCandidateRead: {
@@ -1656,6 +1756,32 @@ export interface components {
             /** Url */
             url: string;
         };
+        /** UserRead */
+        UserRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Email */
+            email: string;
+            /** Display Name */
+            display_name: string | null;
+            /** Is Active */
+            is_active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Last Login At */
+            last_login_at: string | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1727,6 +1853,184 @@ export interface operations {
             };
         };
     };
+    csrf_api_auth_csrf_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CsrfResponse"];
+                };
+            };
+        };
+    };
+    register_api_auth_register_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    login_api_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_api_auth_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                tracelink_refresh?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    logout_api_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+                tracelink_refresh?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    me_api_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_investigations_api_investigations_get: {
         parameters: {
             query?: {
@@ -1735,7 +2039,9 @@ export interface operations {
             };
             header?: never;
             path?: never;
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1764,7 +2070,9 @@ export interface operations {
             query?: never;
             header?: never;
             path?: never;
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -1799,7 +2107,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1830,7 +2140,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -1865,7 +2177,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1896,7 +2210,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1927,7 +2243,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1958,7 +2276,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1995,7 +2315,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2031,7 +2353,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2066,7 +2390,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2104,7 +2430,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2139,7 +2467,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2175,7 +2505,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2212,7 +2544,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2247,7 +2581,9 @@ export interface operations {
                 investigation_id: string;
                 entity_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2279,7 +2615,9 @@ export interface operations {
                 investigation_id: string;
                 relationship_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2317,7 +2655,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2348,7 +2688,9 @@ export interface operations {
             path: {
                 research_task_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2379,7 +2721,9 @@ export interface operations {
             path: {
                 research_task_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2403,39 +2747,6 @@ export interface operations {
             };
         };
     };
-    create_entity_api_entities_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EntityCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EntityRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_entity_api_entities__entity_id__get: {
         parameters: {
             query?: never;
@@ -2443,7 +2754,9 @@ export interface operations {
             path: {
                 entity_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2474,7 +2787,9 @@ export interface operations {
             path: {
                 relationship_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2508,7 +2823,9 @@ export interface operations {
             path: {
                 relationship_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2539,7 +2856,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -2574,7 +2893,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -2612,7 +2933,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2643,7 +2966,9 @@ export interface operations {
             path: {
                 investigation_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -2678,7 +3003,9 @@ export interface operations {
             path: {
                 report_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2709,7 +3036,9 @@ export interface operations {
             path: {
                 source_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2743,7 +3072,9 @@ export interface operations {
             path: {
                 document_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2774,7 +3105,9 @@ export interface operations {
             path: {
                 evidence_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2805,7 +3138,9 @@ export interface operations {
             path: {
                 candidate_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2836,7 +3171,9 @@ export interface operations {
             path: {
                 candidate_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2867,7 +3204,9 @@ export interface operations {
             path: {
                 candidate_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -2898,7 +3237,9 @@ export interface operations {
             path: {
                 candidate_id: string;
             };
-            cookie?: never;
+            cookie?: {
+                tracelink_access?: string | null;
+            };
         };
         requestBody?: never;
         responses: {

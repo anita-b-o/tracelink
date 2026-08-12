@@ -3,9 +3,12 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tracelink.api.authorization import AuthorizationService
+from tracelink.api.dependencies import CurrentUser
+from tracelink.api.rate_limit import RatePolicy, enforce_rate_limit
 from tracelink.api.schemas.rag import (
     AskRequest,
     CitationRead,
@@ -20,13 +23,8 @@ from tracelink.core.config import get_settings
 from tracelink.domain.enums import InvestigationReportStatus
 from tracelink.domain.rag import RetrievalFilters
 from tracelink.infrastructure.database import get_session
-from tracelink.jobs.dispatcher import (
-    DispatchError,
-    ReportDispatcher,
-    get_report_dispatcher,
-)
-from tracelink.repositories.investigations import InvestigationRepository
 from tracelink.repositories.reports import InvestigationReportRepository
+from tracelink.services.audit import AuditService
 from tracelink.services.citations import InvalidCitationError
 from tracelink.services.embedding_providers import EmbeddingProviderError, get_embedding_provider
 from tracelink.services.errors import DomainConflictError, DomainNotFoundError
@@ -34,15 +32,16 @@ from tracelink.services.grounded_answers import GroundedAnswerService
 from tracelink.services.grounded_reports import InvestigationReportService
 from tracelink.services.hybrid_retrieval import HybridRetriever
 from tracelink.services.llm_providers import LLMProviderError, get_llm_provider
+from tracelink.services.outbox import enqueue_task
 
 router = APIRouter()
 Session = Annotated[AsyncSession, Depends(get_session)]
-Reports = Annotated[ReportDispatcher, Depends(get_report_dispatcher)]
 
 
-async def _require_investigation(investigation_id: UUID, session: AsyncSession) -> None:
-    if await InvestigationRepository(session).get_by_id(investigation_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="investigation not found")
+async def _require_investigation(
+    investigation_id: UUID, session: AsyncSession, user_id: UUID
+) -> None:
+    await AuthorizationService(session, user_id).investigation(investigation_id)
 
 
 def _retrieval_filters(payload: SearchRequest) -> RetrievalFilters:
@@ -58,9 +57,12 @@ def _retrieval_filters(payload: SearchRequest) -> RetrievalFilters:
 
 @router.post("/investigations/{investigation_id}/search", response_model=list[SearchHitRead])
 async def search_investigation(
-    investigation_id: UUID, payload: SearchRequest, session: Session
+    investigation_id: UUID,
+    payload: SearchRequest,
+    session: Session,
+    current_user: CurrentUser,
 ) -> object:
-    await _require_investigation(investigation_id, session)
+    await _require_investigation(investigation_id, session, current_user.id)
     settings = get_settings()
     try:
         hits = await HybridRetriever(session, settings, get_embedding_provider(settings)).search(
@@ -98,10 +100,19 @@ async def search_investigation(
 
 @router.post("/investigations/{investigation_id}/ask", response_model=GroundedAnswerRead)
 async def ask_investigation(
-    investigation_id: UUID, payload: AskRequest, session: Session
+    investigation_id: UUID,
+    payload: AskRequest,
+    session: Session,
+    current_user: CurrentUser,
+    request: Request,
 ) -> object:
-    await _require_investigation(investigation_id, session)
+    await _require_investigation(investigation_id, session, current_user.id)
     settings = get_settings()
+    await enforce_rate_limit(
+        request,
+        RatePolicy("ask", settings.rate_limit_ask_count, 60),
+        str(current_user.id),
+    )
     try:
         embeddings = get_embedding_provider(settings)
         result = await GroundedAnswerService(
@@ -137,9 +148,16 @@ async def create_report(
     payload: ReportCreate,
     response: Response,
     session: Session,
-    dispatcher: Reports,
+    current_user: CurrentUser,
+    request: Request,
 ) -> object:
+    await _require_investigation(investigation_id, session, current_user.id)
     settings = get_settings()
+    await enforce_rate_limit(
+        request,
+        RatePolicy("reports", settings.rate_limit_reports_count, 3600),
+        str(current_user.id),
+    )
     try:
         embeddings = get_embedding_provider(settings)
         service = InvestigationReportService(
@@ -149,6 +167,20 @@ async def create_report(
             HybridRetriever(session, settings, embeddings),
         )
         report = await service.request(investigation_id, payload.type, payload.subject_entity_id)
+        if report.status is InvestigationReportStatus.PENDING:
+            outbox = await enqueue_task(
+                session,
+                "tracelink.generate_investigation_report",
+                [str(report.id)],
+            )
+            report.active_celery_task_id = str(outbox.id)
+        await AuditService(session).record(
+            user_id=current_user.id,
+            action="report.create",
+            resource_type="investigation_report",
+            resource_id=report.id,
+            metadata={"type": report.type.value},
+        )
         await session.commit()
     except DomainNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -160,18 +192,6 @@ async def create_report(
         ) from exc
     if report.status is InvestigationReportStatus.COMPLETED:
         response.status_code = status.HTTP_200_OK
-    elif report.status is InvestigationReportStatus.PENDING:
-        try:
-            task_id = await dispatcher.dispatch(report.id)
-            report.active_celery_task_id = task_id
-            await session.commit()
-        except DispatchError as exc:
-            await service.fail(report.id, code="DISPATCH_FAILED", message=str(exc))
-            await session.commit()
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="report task could not be queued",
-            ) from exc
     await session.refresh(report)
     return report
 
@@ -183,18 +203,16 @@ async def create_report(
 async def list_reports(
     investigation_id: UUID,
     session: Session,
+    current_user: CurrentUser,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> object:
-    await _require_investigation(investigation_id, session)
+    await _require_investigation(investigation_id, session, current_user.id)
     return await InvestigationReportRepository(session).list_by_investigation(
         investigation_id, limit=limit, offset=offset
     )
 
 
 @router.get("/reports/{report_id}", response_model=InvestigationReportRead)
-async def get_report(report_id: UUID, session: Session) -> object:
-    report = await InvestigationReportRepository(session).get(report_id)
-    if report is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report not found")
-    return report
+async def get_report(report_id: UUID, session: Session, current_user: CurrentUser) -> object:
+    return await AuthorizationService(session, current_user.id).report(report_id)

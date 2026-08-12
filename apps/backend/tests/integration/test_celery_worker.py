@@ -34,6 +34,7 @@ from tracelink.jobs.celery_app import celery_app
 from tracelink.jobs.reports import generate_investigation_report
 from tracelink.jobs.research import execute_research_task
 from tracelink.main import app
+from tracelink.outbox_dispatcher import dispatch_once
 from tracelink.repositories.investigations import InvestigationRepository
 from tracelink.repositories.research_tasks import ResearchTaskRepository
 from tracelink.services.embedding_providers import FakeEmbeddingProvider
@@ -108,6 +109,7 @@ async def test_real_celery_worker_consumes_research_task(db_session: AsyncSessio
 
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
+            await dispatch_once()
             await db_session.rollback()
             mention_count = await db_session.scalar(select(func.count()).select_from(EntityMention))
             relationship_count = await db_session.scalar(

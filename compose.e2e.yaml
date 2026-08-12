@@ -1,21 +1,41 @@
 services:
   frontend:
+    build:
+      target: production
+      args:
+        APP_ENV: test
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:${BACKEND_PORT:-8100}
+      APP_ENV: test
       NEXT_PUBLIC_GRAPH_MAX_NODES: 250
+    volumes: !reset []
 
   backend:
     environment:
-      ENVIRONMENT: test
-      CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-3100}
+      APP_ENV: test
+      CORS_ALLOWED_ORIGINS: http://localhost:${FRONTEND_PORT:-3100}
       FAKE_RESEARCH_MODE: PIPELINE_SUCCESS
       FAKE_RESEARCH_DELAY_MS: 10
+    volumes: !reset []
 
   worker:
     environment:
-      ENVIRONMENT: test
+      APP_ENV: test
       FAKE_RESEARCH_MODE: PIPELINE_SUCCESS
       FAKE_RESEARCH_DELAY_MS: 10
+    volumes: !reset []
+
+  outbox:
+    environment:
+      APP_ENV: test
+      FAKE_RESEARCH_MODE: PIPELINE_SUCCESS
+    volumes: !reset []
+
+  migrate:
+    environment:
+      APP_ENV: test
+      DEV_BOOTSTRAP_EMAIL: e2e@example.com
+      DEV_BOOTSTRAP_PASSWORD: e2e-password-secure
+    volumes: !reset []
 
   e2e-fixtures:
     profiles: ["fixtures"]
@@ -23,12 +43,13 @@ services:
       context: .
       dockerfile: infra/docker/backend.Dockerfile
       target: development
-    command: ["sh", "-c", "alembic upgrade head && python -m tracelink.e2e_seed"]
+    command: ["python", "-m", "tracelink.e2e_seed"]
     environment:
-      ENVIRONMENT: test
+      APP_ENV: test
+      E2E_SEED_ENABLED: "true"
+      DEV_BOOTSTRAP_EMAIL: e2e@example.com
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tracelink}:${POSTGRES_PASSWORD:-tracelink_e2e}@postgres:5432/${POSTGRES_DB:-tracelink_e2e}
-    volumes:
-      - ./apps/backend:/app
+    volumes: []
     depends_on:
       postgres:
         condition: service_healthy

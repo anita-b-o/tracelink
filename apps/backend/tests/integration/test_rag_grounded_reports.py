@@ -23,12 +23,12 @@ from tracelink.domain.enums import (
 from tracelink.domain.models import (
     EmbeddingRecord,
     EntityMention,
+    OutboxEvent,
     RelationshipCandidate,
     RetrievalChunk,
 )
 from tracelink.domain.rag import GeneratedAnswer, GroundedClaim, GroundedContext, RetrievalFilters
 from tracelink.infrastructure.database import get_session
-from tracelink.jobs.dispatcher import get_report_dispatcher
 from tracelink.main import app
 from tracelink.repositories.documents import DocumentRepository
 from tracelink.repositories.entities import EntityRepository
@@ -422,26 +422,15 @@ async def test_embedding_provider_failure_is_controlled(db_session: AsyncSession
         )
 
 
-class CapturingReportDispatcher:
-    def __init__(self) -> None:
-        self.report_ids: list[UUID] = []
-
-    async def dispatch(self, report_id: UUID) -> str:
-        self.report_ids.append(report_id)
-        return f"captured-{report_id}"
-
-
 async def test_search_ask_and_report_api_smoke(db_session: AsyncSession) -> None:
     fixture = await seed_fixture(db_session, suffix="api")
     await index_fixture(db_session, fixture)
     await db_session.commit()
-    dispatcher = CapturingReportDispatcher()
 
     async def session_override():  # type: ignore[no-untyped-def]
         yield db_session
 
     app.dependency_overrides[get_session] = session_override
-    app.dependency_overrides[get_report_dispatcher] = lambda: dispatcher
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             search_response = await client.post(
@@ -466,7 +455,9 @@ async def test_search_ask_and_report_api_smoke(db_session: AsyncSession) -> None
         assert ask_response.json()["abstained"] is False
         assert ask_response.json()["citations"]
         assert report_response.status_code == 202, report_response.text
-        assert dispatcher.report_ids == [UUID(report_response.json()["id"])]
+        event = await db_session.scalar(select(OutboxEvent))
+        assert event is not None
+        assert event.payload["args"] == [report_response.json()["id"]]
         assert reports_response.status_code == 200
         assert reports_response.json()[0]["status"] == "PENDING"
     finally:

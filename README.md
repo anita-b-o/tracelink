@@ -4,9 +4,9 @@ TraceLink será un sistema web de investigación OSINT asistida por IA para due 
 empresas y personas. Su principio central es que cada entidad, relación y conclusión debe poder
 rastrearse hasta evidencia pública o aportada legalmente por el usuario.
 
-El repositorio contiene la **Fase 7**: dominio y workflow asíncrono, connectors, extracción y
-resolución de entidades/relaciones, RAG/reportes grounded y un workspace completo. Incluye grafo,
-timeline y review humano; todavía no incluye autenticación, multi-user ni deploy.
+El repositorio contiene la **Fase 8**: además del workflow completo, incluye auth Argon2/JWT con
+refresh rotativo, aislamiento multiusuario, outbox transaccional, observabilidad y artefactos
+production/staging. Está listo para desplegar; no realiza deploy automático.
 
 ## Arquitectura actual
 
@@ -21,7 +21,7 @@ docs/            Decisiones de arquitectura
 compose.yaml     Stack local completo
 ```
 
-Docker Compose levanta cinco servicios: `frontend`, `backend`, `worker`, `postgres` y `redis`.
+Docker Compose levanta Next, FastAPI, Celery, dispatcher outbox, migración, PostgreSQL y Redis.
 PostgreSQL usa una imagen con pgvector. Alembic habilita la extensión y crea el modelo de dominio.
 
 ## Requisitos
@@ -34,17 +34,16 @@ PostgreSQL usa una imagen con pgvector. Alembic habilita la extensión y crea el
 ```bash
 cp .env.example .env
 docker compose up --build --wait
-docker compose exec backend alembic upgrade head
 ```
 
 Servicios disponibles:
 
 - Frontend: <http://localhost:3000>
-- API: <http://localhost:8000>
+- API directa de desarrollo: <http://localhost:8000>
 - OpenAPI: <http://localhost:8000/docs>
 - Liveness: <http://localhost:8000/api/health/live>
 - Readiness: <http://localhost:8000/api/health/ready>
-- Investigations: <http://localhost:8000/api/investigations>
+- Login: <http://localhost:3000/login> (`dev@tracelink.local` / `tracelink-development` localmente)
 
 Para ver logs o detener el entorno:
 
@@ -93,11 +92,12 @@ Los valores predeterminados del backend apuntan a los puertos locales de Postgre
 | `POSTGRES_DB` | Base de datos local | `tracelink` |
 | `POSTGRES_USER` | Usuario local | `tracelink` |
 | `POSTGRES_PASSWORD` | Contraseña local | `tracelink_dev` |
-| `NEXT_PUBLIC_API_BASE_URL` | URL del API visible para el navegador | `http://localhost:8000` |
+| `APP_ENV` | `development`, `test`, `staging` o `production` | `development` |
+| `BACKEND_INTERNAL_URL` | API privada consumida por Next | `http://backend:8000` |
 | `NEXT_PUBLIC_GRAPH_MAX_NODES` | Límite inicial de nodos React Flow | `250` |
-| `CORS_ORIGINS` | Orígenes permitidos, separados por coma | `http://localhost:3000` |
+| `CORS_ALLOWED_ORIGINS` | Orígenes exactos permitidos | `http://localhost:3000` |
 | `LOG_LEVEL` | Nivel de logging del backend y worker | `INFO` |
-| `ENVIRONMENT` | Selección de composición (`test` usa search fake) | `development` |
+| `AUTH_JWT_SECRET` / `AUTH_TOKEN_PEPPER` | Secretos separados de sesión | valores sólo dev |
 | `RESEARCH_TASK_MAX_ATTEMPTS` | Máximo de ejecuciones de dominio por task | `3` |
 | `FAKE_RESEARCH_DELAY_MS` | Delay base del executor simulado | `25` |
 | `CELERY_TRANSPORT_MAX_RETRIES` | Retries acotados ante fallos de infraestructura | `3` |
@@ -165,7 +165,11 @@ GitHub Actions ejecuta estos checks y un smoke test del stack. No realiza deploy
 - El modelo y sus decisiones están documentados en [docs/data-model.md](docs/data-model.md).
 - El workflow está documentado en
   [docs/investigation-workflow.md](docs/investigation-workflow.md).
-- No existe autenticación ni asociación de registros a usuarios.
+- Auth y ownership se documentan en [docs/authentication.md](docs/authentication.md).
+- Operación, seguridad y despliegue están en [docs/operations.md](docs/operations.md),
+  [docs/security.md](docs/security.md) y [docs/deployment.md](docs/deployment.md).
+- Performance, planes SQL y concurrencia están en
+  [docs/performance-baseline.md](docs/performance-baseline.md).
 - Celery enruta research, entity/relationship processing, embeddings y reportes.
 - El workspace, review y graph UI se documentan en
   [frontend-workspace.md](docs/frontend-workspace.md),

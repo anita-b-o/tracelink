@@ -3,40 +3,23 @@ from uuid import UUID
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tracelink.domain.enums import FakeResearchMode
+from tracelink.domain.models import OutboxEvent
 from tracelink.infrastructure.database import get_session
-from tracelink.jobs.dispatcher import get_research_task_dispatcher
 from tracelink.jobs.research import execute_research_task_async
 from tracelink.main import app
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
-class CapturingDispatcher:
-    def __init__(self) -> None:
-        self.task_ids: list[UUID] = []
-
-    async def dispatch(
-        self,
-        research_task_id: UUID,
-        *,
-        mode: FakeResearchMode = FakeResearchMode.SUCCESS,
-    ) -> str:
-        _ = mode
-        self.task_ids.append(research_task_id)
-        return f"captured-{research_task_id}"
-
-
 async def test_workflow_api_contracts(db_session: AsyncSession) -> None:
-    dispatcher = CapturingDispatcher()
-
     async def session_override() -> AsyncIterator[AsyncSession]:
         yield db_session
 
     app.dependency_overrides[get_session] = session_override
-    app.dependency_overrides[get_research_task_dispatcher] = lambda: dispatcher
     transport = ASGITransport(app=app)
     try:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -49,11 +32,11 @@ async def test_workflow_api_contracts(db_session: AsyncSession) -> None:
             started = await client.post(f"/api/investigations/{investigation_id}/start")
             assert started.status_code == 202
             assert started.json()["status"] == "PENDING"
-            assert len(dispatcher.task_ids) == 4
+            assert await db_session.scalar(select(func.count()).select_from(OutboxEvent)) == 4
 
             repeated = await client.post(f"/api/investigations/{investigation_id}/start")
             assert repeated.status_code == 202
-            assert len(dispatcher.task_ids) == 8
+            assert await db_session.scalar(select(func.count()).select_from(OutboxEvent)) == 8
 
             tasks_response = await client.get(f"/api/investigations/{investigation_id}/tasks")
             assert tasks_response.status_code == 200
@@ -94,13 +77,10 @@ async def test_workflow_api_contracts(db_session: AsyncSession) -> None:
 
 
 async def test_retry_endpoint_dispatches_failed_task(db_session: AsyncSession) -> None:
-    dispatcher = CapturingDispatcher()
-
     async def session_override() -> AsyncIterator[AsyncSession]:
         yield db_session
 
     app.dependency_overrides[get_session] = session_override
-    app.dependency_overrides[get_research_task_dispatcher] = lambda: dispatcher
     transport = ASGITransport(app=app)
     try:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -121,7 +101,11 @@ async def test_retry_endpoint_dispatches_failed_task(db_session: AsyncSession) -
             assert retried.status_code == 202
             assert retried.json()["status"] == "PENDING"
             assert retried.json()["attempts"] == 1
-            assert dispatcher.task_ids[-1] == failed_id
+            event = await db_session.scalar(
+                select(OutboxEvent).order_by(OutboxEvent.created_at.desc(), OutboxEvent.id.desc())
+            )
+            assert event is not None
+            assert event.payload["args"][0] == str(failed_id)
             assert (await client.post(f"/api/research-tasks/{failed_id}/retry")).status_code == 409
     finally:
         app.dependency_overrides.clear()

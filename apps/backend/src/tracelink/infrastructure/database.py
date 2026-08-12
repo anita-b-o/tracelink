@@ -45,7 +45,19 @@ def _register_vector(dbapi_connection: Any, _: Any) -> None:
 
 @lru_cache
 def get_engine() -> AsyncEngine:
-    engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
+    settings = get_settings()
+    engine = create_async_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_timeout=settings.db_pool_timeout_seconds,
+        pool_recycle=settings.db_pool_recycle_seconds,
+        connect_args={
+            "connect_timeout": settings.db_connect_timeout_seconds,
+            "options": f"-c statement_timeout={settings.db_statement_timeout_ms}",
+        },
+    )
     event.listen(engine.sync_engine, "connect", _register_vector)
     return engine
 

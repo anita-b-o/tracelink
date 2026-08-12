@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.base import Executable
 
+from tracelink.api.authorization import AuthorizationService
+from tracelink.api.dependencies import CurrentUser
 from tracelink.api.routes.relationships import evidence_read, relationship_read
 from tracelink.api.schemas.relationships import (
     GraphEdgeRead,
@@ -45,9 +47,10 @@ resource_router = APIRouter()
 Session = Annotated[AsyncSession, Depends(get_session)]
 
 
-async def require_investigation(session: AsyncSession, investigation_id: UUID) -> None:
-    if await session.get(Investigation, investigation_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="investigation not found")
+async def require_investigation(
+    session: AsyncSession, investigation_id: UUID, user_id: UUID
+) -> None:
+    await AuthorizationService(session, user_id).investigation(investigation_id)
 
 
 def source_summary(source: Source, document_count: int = 0) -> SourceSummaryRead:
@@ -95,12 +98,13 @@ def candidate_read(
 async def list_investigation_sources(
     investigation_id: UUID,
     session: Session,
-    q: str | None = None,
+    current_user: CurrentUser,
+    q: Annotated[str | None, Query(max_length=500)] = None,
     source_type: str | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 26,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> list[SourceSummaryRead]:
-    await require_investigation(session, investigation_id)
+    await require_investigation(session, investigation_id, current_user.id)
     statement = (
         select(Source, func.count(func.distinct(Document.id)))
         .join(InvestigationArtifact, InvestigationArtifact.source_id == Source.id)
@@ -156,13 +160,14 @@ async def document_summaries(
 async def list_investigation_documents(
     investigation_id: UUID,
     session: Session,
-    q: str | None = None,
+    current_user: CurrentUser,
+    q: Annotated[str | None, Query(max_length=500)] = None,
     mime_type: str | None = None,
     source_id: UUID | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 26,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> list[DocumentSummaryRead]:
-    await require_investigation(session, investigation_id)
+    await require_investigation(session, investigation_id, current_user.id)
     chunk_count = (
         select(func.count(RetrievalChunk.id))
         .where(RetrievalChunk.document_id == Document.id)
@@ -211,12 +216,16 @@ async def list_investigation_documents(
 
 
 @resource_router.get("/sources/{source_id}", response_model=SourceSummaryRead)
-async def get_source(source_id: UUID, session: Session) -> SourceSummaryRead:
+async def get_source(
+    source_id: UUID, session: Session, current_user: CurrentUser
+) -> SourceSummaryRead:
+    await AuthorizationService(session, current_user.id).source(source_id)
     row = (
         await session.execute(
-            select(Source, func.count(Document.id))
-            .outerjoin(Document, Document.source_id == Source.id)
-            .where(Source.id == source_id)
+            select(Source, func.count(func.distinct(InvestigationArtifact.document_id)))
+            .join(InvestigationArtifact, InvestigationArtifact.source_id == Source.id)
+            .join(Investigation, Investigation.id == InvestigationArtifact.investigation_id)
+            .where(Source.id == source_id, Investigation.user_id == current_user.id)
             .group_by(Source.id)
         )
     ).one_or_none()
@@ -229,17 +238,20 @@ async def get_source(source_id: UUID, session: Session) -> SourceSummaryRead:
 async def get_document(
     document_id: UUID,
     session: Session,
+    current_user: CurrentUser,
     content_offset: Annotated[int, Query(ge=0)] = 0,
     content_limit: Annotated[int, Query(ge=1, le=5000)] = 2000,
 ) -> DocumentDetailRead:
-    document = await session.get(Document, document_id)
-    if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
+    document = await AuthorizationService(session, current_user.id).document(document_id)
     source = await session.get(Source, document.source_id)
     assert source is not None
     investigation_id = await session.scalar(
         select(InvestigationArtifact.investigation_id)
-        .where(InvestigationArtifact.document_id == document_id)
+        .join(Investigation, Investigation.id == InvestigationArtifact.investigation_id)
+        .where(
+            InvestigationArtifact.document_id == document_id,
+            Investigation.user_id == current_user.id,
+        )
         .order_by(InvestigationArtifact.created_at)
         .limit(1)
     )
@@ -247,10 +259,17 @@ async def get_document(
         select(func.count(RetrievalChunk.id)).where(RetrievalChunk.document_id == document_id)
     )
     mentions = await session.scalar(
-        select(func.count(EntityMention.id)).where(EntityMention.document_id == document_id)
+        select(func.count(EntityMention.id))
+        .join(Investigation, Investigation.id == EntityMention.investigation_id)
+        .where(
+            EntityMention.document_id == document_id,
+            Investigation.user_id == current_user.id,
+        )
     )
     evidence = await session.scalar(
-        select(func.count(Evidence.id)).where(Evidence.document_id == document_id)
+        select(func.count(Evidence.id))
+        .join(Investigation, Investigation.id == Evidence.investigation_id)
+        .where(Evidence.document_id == document_id, Investigation.user_id == current_user.id)
     )
     _ = investigation_id
     content = document.raw_text[content_offset : content_offset + content_limit]
@@ -272,10 +291,10 @@ async def get_document(
 
 
 @resource_router.get("/evidence/{evidence_id}", response_model=RelationshipEvidenceRead)
-async def get_evidence(evidence_id: UUID, session: Session) -> RelationshipEvidenceRead:
-    evidence = await session.get(Evidence, evidence_id)
-    if evidence is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="evidence not found")
+async def get_evidence(
+    evidence_id: UUID, session: Session, current_user: CurrentUser
+) -> RelationshipEvidenceRead:
+    evidence = await AuthorizationService(session, current_user.id).evidence(evidence_id)
     return await evidence_read(session, evidence)
 
 
@@ -287,10 +306,11 @@ async def list_entity_evidence(
     investigation_id: UUID,
     entity_id: UUID,
     session: Session,
+    current_user: CurrentUser,
     limit: Annotated[int, Query(ge=1, le=100)] = 26,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> list[RelationshipEvidenceRead]:
-    await require_investigation(session, investigation_id)
+    await require_investigation(session, investigation_id, current_user.id)
     items = list(
         await session.scalars(
             select(Evidence)
@@ -308,9 +328,12 @@ async def list_entity_evidence(
     response_model=RelationshipDetailRead,
 )
 async def get_investigation_relationship(
-    investigation_id: UUID, relationship_id: UUID, session: Session
+    investigation_id: UUID,
+    relationship_id: UUID,
+    session: Session,
+    current_user: CurrentUser,
 ) -> RelationshipDetailRead:
-    await require_investigation(session, investigation_id)
+    await require_investigation(session, investigation_id, current_user.id)
     relationship = await session.scalar(
         select(Relationship)
         .options(
@@ -365,14 +388,15 @@ async def get_investigation_relationship(
 async def get_investigation_graph(
     investigation_id: UUID,
     session: Session,
+    current_user: CurrentUser,
     entity_type: EntityType | None = None,
     relationship_type: RelationshipType | None = None,
     relationship_status: AssertionStatus | None = None,
-    q: str | None = None,
+    q: Annotated[str | None, Query(max_length=500)] = None,
     focus_entity_id: UUID | None = None,
     max_nodes: Annotated[int, Query(ge=1, le=250)] = 250,
 ) -> InvestigationGraphRead:
-    await require_investigation(session, investigation_id)
+    await require_investigation(session, investigation_id, current_user.id)
     mentioned_entity_ids = select(EntityMention.entity_id).where(
         EntityMention.investigation_id == investigation_id,
         EntityMention.entity_id.is_not(None),

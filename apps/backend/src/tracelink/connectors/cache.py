@@ -8,6 +8,8 @@ from typing import Any
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
+from tracelink.observability.metrics import CACHE_OPERATIONS
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,7 +29,9 @@ class ConnectorCache:
             value = await self.redis.get(key)
         except RedisError:
             logger.warning("research cache read failed")
+            CACHE_OPERATIONS.labels("research", "error").inc()
             return None
+        CACHE_OPERATIONS.labels("research", "hit" if value is not None else "miss").inc()
         return str(value) if value is not None else None
 
     async def set(self, key: str, value: str) -> None:
@@ -35,3 +39,6 @@ class ConnectorCache:
             await self.redis.set(key, value, ex=self.ttl_seconds)
         except RedisError:
             logger.warning("research cache write failed")
+            CACHE_OPERATIONS.labels("research", "error").inc()
+        else:
+            CACHE_OPERATIONS.labels("research", "write").inc()

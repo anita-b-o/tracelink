@@ -1,0 +1,89 @@
+services:
+  frontend:
+    image: tracelink-frontend:${IMAGE_TAG:-staging}
+    build:
+      target: production
+      args:
+        APP_ENV: staging
+    environment:
+      APP_ENV: staging
+      BACKEND_INTERNAL_URL: http://backend:8000
+    volumes: !reset []
+
+  backend:
+    image: tracelink-backend:${IMAGE_TAG:-staging}
+    build:
+      target: production
+    environment:
+      APP_ENV: staging
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set exact HTTPS frontend origin}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?set backend service host}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set a random 32-byte secret}
+      AUTH_TOKEN_PEPPER: ${AUTH_TOKEN_PEPPER:?set a distinct random 32-byte pepper}
+      COOKIE_SECURE: "true"
+      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:?set true or false explicitly}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN:?set metrics token}
+    volumes: !reset []
+    ports: !reset []
+
+  worker:
+    image: tracelink-backend:${IMAGE_TAG:-staging}
+    build:
+      target: production
+    environment:
+      APP_ENV: staging
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set exact HTTPS frontend origin}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?set backend service host}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set a random 32-byte secret}
+      AUTH_TOKEN_PEPPER: ${AUTH_TOKEN_PEPPER:?set a distinct random 32-byte pepper}
+      COOKIE_SECURE: "true"
+      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:?set true or false explicitly}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes: !reset []
+
+  outbox:
+    image: tracelink-backend:${IMAGE_TAG:-staging}
+    build:
+      target: production
+    environment:
+      APP_ENV: staging
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set exact HTTPS frontend origin}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?set backend service host}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set a random 32-byte secret}
+      AUTH_TOKEN_PEPPER: ${AUTH_TOKEN_PEPPER:?set a distinct random 32-byte pepper}
+      COOKIE_SECURE: "true"
+      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:?set true or false explicitly}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes: !reset []
+
+  migrate:
+    image: tracelink-backend:${IMAGE_TAG:-staging}
+    build:
+      target: production
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      APP_ENV: staging
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set a random 32-byte secret}
+      AUTH_TOKEN_PEPPER: ${AUTH_TOKEN_PEPPER:?set a distinct random 32-byte pepper}
+      COOKIE_SECURE: "true"
+      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:?set true or false explicitly}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set exact HTTPS frontend origin}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?set backend service host}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes: !reset []
+
+  postgres:
+    ports: !reset []
+
+  redis:
+    ports: !reset []

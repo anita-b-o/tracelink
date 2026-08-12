@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from enum import StrEnum
 from typing import Annotated, Literal
@@ -40,7 +41,7 @@ class ReadinessResponse(BaseModel):
 
 async def database_health() -> ComponentHealth:
     try:
-        await check_database_connection()
+        await asyncio.wait_for(check_database_connection(), timeout=3)
     except Exception:
         logger.warning("Database readiness check failed")
         return ComponentHealth(status=ComponentStatus.DOWN, detail="connection failed")
@@ -49,7 +50,7 @@ async def database_health() -> ComponentHealth:
 
 async def redis_health() -> ComponentHealth:
     try:
-        await check_redis_connection()
+        await asyncio.wait_for(check_redis_connection(), timeout=3)
     except Exception:
         logger.warning("Redis readiness check failed")
         return ComponentHealth(status=ComponentStatus.DOWN, detail="connection failed")

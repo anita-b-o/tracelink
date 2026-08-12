@@ -1,18 +1,19 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tracelink.api.authorization import AuthorizationService
+from tracelink.api.dependencies import CurrentUser
 from tracelink.api.schemas.relationships import (
     RelationshipEntitySummary,
     RelationshipEvidenceRead,
     RelationshipRead,
 )
-from tracelink.domain.models import Document, Evidence, Relationship, Source
+from tracelink.domain.models import Document, Evidence, Investigation, Relationship, Source
 from tracelink.infrastructure.database import get_session
-from tracelink.repositories.evidence import EvidenceRepository
-from tracelink.repositories.relationships import RelationshipRepository
 
 router = APIRouter()
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -80,23 +81,45 @@ async def evidence_read(session: AsyncSession, evidence: Evidence) -> Relationsh
 
 
 @router.get("/{relationship_id}", response_model=RelationshipRead)
-async def get_relationship(relationship_id: UUID, session: Session) -> RelationshipRead:
-    relationship = await RelationshipRepository(session).get_by_id(relationship_id)
-    if relationship is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="relationship not found")
-    return relationship_read(relationship, len(relationship.evidence))
+async def get_relationship(
+    relationship_id: UUID, session: Session, current_user: CurrentUser
+) -> RelationshipRead:
+    authorization = AuthorizationService(session, current_user.id)
+    relationship = await authorization.relationship(relationship_id)
+    evidence_count = int(
+        await session.scalar(
+            select(func.count(Evidence.id))
+            .join(Investigation, Investigation.id == Evidence.investigation_id)
+            .where(
+                Evidence.relationship_id == relationship_id,
+                Investigation.user_id == current_user.id,
+            )
+        )
+        or 0
+    )
+    return relationship_read(relationship, evidence_count)
 
 
 @router.get("/{relationship_id}/evidence", response_model=list[RelationshipEvidenceRead])
 async def list_relationship_evidence(
     relationship_id: UUID,
     session: Session,
+    current_user: CurrentUser,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> list[RelationshipEvidenceRead]:
-    if await RelationshipRepository(session).get_by_id(relationship_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="relationship not found")
-    items = await EvidenceRepository(session).list_by_relationship(
-        relationship_id, limit=limit, offset=offset
+    await AuthorizationService(session, current_user.id).relationship(relationship_id)
+    items = list(
+        await session.scalars(
+            select(Evidence)
+            .join(Investigation, Investigation.id == Evidence.investigation_id)
+            .where(
+                Evidence.relationship_id == relationship_id,
+                Investigation.user_id == current_user.id,
+            )
+            .order_by(Evidence.created_at.desc(), Evidence.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
     )
     return [await evidence_read(session, item) for item in items]

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tracelink.core.config import Settings
 from tracelink.domain.rag import GroundedAnswerResult, RetrievalFilters
+from tracelink.observability.metrics import LLM_CALLS
 from tracelink.services.citations import CitationValidator
 from tracelink.services.grounded_context import GroundedContextBuilder
 from tracelink.services.hybrid_retrieval import HybridRetriever
@@ -58,7 +59,12 @@ class GroundedAnswerService:
                 contradictions=context.contradictions,
             )
 
-        generated = await self.llm_provider.generate_answer(question, context)
+        try:
+            generated = await self.llm_provider.generate_answer(question, context)
+        except Exception:
+            LLM_CALLS.labels(self.llm_provider.provider_name, "failure").inc()
+            raise
+        LLM_CALLS.labels(self.llm_provider.provider_name, "success").inc()
         claims = await CitationValidator(self.session).validate_claims(context, generated.claims)
         capped_claims = []
         for claim in claims:

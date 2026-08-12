@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.integration.test_relationship_extraction_evidence import (
@@ -19,6 +19,7 @@ from tracelink.domain.enums import (
     RelationshipType,
 )
 from tracelink.domain.models import (
+    AuditEvent,
     Document,
     EntityMention,
     EntityResolutionCandidate,
@@ -170,6 +171,15 @@ async def test_workspace_contracts_filters_graph_and_review_are_transactional(
             assert accepted.status_code == 200 and accepted.json()["status"] == "ACCEPTED"
             assert (
                 await db_session.scalar(
+                    select(func.count(AuditEvent.id)).where(
+                        AuditEvent.action == "entity_resolution.accept",
+                        AuditEvent.resource_id == entity_candidate_id,
+                    )
+                )
+                == 1
+            )
+            assert (
+                await db_session.scalar(
                     select(EntityMention.entity_id).where(EntityMention.id == company_mention_id)
                 )
                 == target_id
@@ -180,7 +190,7 @@ async def test_workspace_contracts_filters_graph_and_review_are_transactional(
                         Relationship.id == dependent_relationship_id
                     )
                 )
-                == target_id
+                == provisional_id
             )
             assert (
                 await db_session.scalar(
@@ -190,11 +200,18 @@ async def test_workspace_contracts_filters_graph_and_review_are_transactional(
                 )
                 == target_id
             )
+            migrated_relationship_id = await db_session.scalar(
+                select(Evidence.relationship_id).where(Evidence.id == preserved_evidence_id)
+            )
+            assert migrated_relationship_id is not None
+            assert migrated_relationship_id != dependent_relationship_id
             assert (
                 await db_session.scalar(
-                    select(Evidence.relationship_id).where(Evidence.id == preserved_evidence_id)
+                    select(Relationship.target_entity_id).where(
+                        Relationship.id == migrated_relationship_id
+                    )
                 )
-                == dependent_relationship_id
+                == target_id
             )
             repeated = await client.post(
                 f"/api/entity-resolution-candidates/{entity_candidate_id}/accept"

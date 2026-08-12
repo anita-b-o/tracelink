@@ -115,3 +115,10 @@ class InvestigationReportStatus(StrEnum):
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+
+
+class OutboxStatus(StrEnum):
+    PENDING = "PENDING"
+    PUBLISHING = "PUBLISHING"
+    PUBLISHED = "PUBLISHED"
+    FAILED = "FAILED"

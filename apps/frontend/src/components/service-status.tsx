@@ -15,11 +15,10 @@ export function ServiceStatus() {
 
   useEffect(() => {
     const controller = new AbortController();
-    const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
     async function checkServices() {
       try {
-        const response = await fetch(`${apiUrl}/api/health/ready`, {
+        const response = await fetch("/api/health/ready", {
           signal: controller.signal,
         });
         setAvailability(response.ok ? "available" : "unavailable");

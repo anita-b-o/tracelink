@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from tracelink.connectors.models import ConnectorOutput, DocumentArtifact, SourceArtifact
+from tracelink.core.config import get_settings
 from tracelink.domain.enums import (
     AssertionStatus,
     EntityResolutionCandidateStatus,
@@ -17,7 +18,7 @@ from tracelink.domain.enums import (
     RelationshipClaimKind,
     RelationshipType,
 )
-from tracelink.domain.models import EntityMention, Investigation
+from tracelink.domain.models import EntityMention, Investigation, User
 from tracelink.domain.normalization import normalize_entity_name, sha256_text
 from tracelink.infrastructure.database import close_database, get_session_factory
 from tracelink.repositories.entities import EntityRepository
@@ -29,6 +30,7 @@ from tracelink.repositories.evidence import EvidenceRepository
 from tracelink.repositories.investigations import InvestigationRepository
 from tracelink.repositories.relationship_candidates import RelationshipCandidateRepository
 from tracelink.repositories.relationships import RelationshipRepository
+from tracelink.services.auth import normalize_email
 from tracelink.services.entities import EntityService
 from tracelink.services.research_artifacts import ResearchArtifactService
 
@@ -36,14 +38,26 @@ FIXTURE_TITLE = "Review and graph fixture"
 
 
 async def seed() -> None:
+    settings = get_settings()
+    if settings.app_env != "test" or not settings.e2e_seed_enabled:
+        raise SystemExit("E2E seed requires APP_ENV=test and E2E_SEED_ENABLED=true")
     async with get_session_factory()() as session:
+        owner = await session.scalar(
+            select(User).where(User.email == normalize_email(settings.dev_bootstrap_email))
+        )
+        if owner is None:
+            raise SystemExit("E2E owner is missing; run the test bootstrap migration first")
         existing = await session.scalar(
-            select(Investigation).where(Investigation.title == FIXTURE_TITLE)
+            select(Investigation).where(
+                Investigation.title == FIXTURE_TITLE, Investigation.user_id == owner.id
+            )
         )
         if existing is not None:
             return
         investigation = await InvestigationRepository(session).create(
-            FIXTURE_TITLE, "Review entity resolution and relationship evidence for ACME"
+            FIXTURE_TITLE,
+            "Review entity resolution and relationship evidence for ACME",
+            user_id=owner.id,
         )
         investigation.status = InvestigationStatus.COMPLETED
         text = "Jane Doe directs Acme SA since 2020. ACME disputes an ownership allegation."

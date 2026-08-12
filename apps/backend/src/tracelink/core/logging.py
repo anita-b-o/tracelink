@@ -1,7 +1,10 @@
 import json
 import logging
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
+
+request_id_context: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 
 class JsonFormatter(logging.Formatter):
@@ -14,6 +17,8 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
+        if request_id := request_id_context.get():
+            payload["request_id"] = request_id
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         for field in (
@@ -50,6 +55,10 @@ class JsonFormatter(logging.Formatter):
             "llm_provider",
             "llm_model",
             "abstained",
+            "user_id",
+            "auth_event",
+            "rate_limit_policy",
+            "outbox_event_id",
         ):
             value = getattr(record, field, None)
             if value is not None:

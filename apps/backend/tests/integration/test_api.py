@@ -10,7 +10,9 @@ from tracelink.main import app
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
-async def test_minimal_investigation_and_entity_endpoints(db_session: AsyncSession) -> None:
+async def test_minimal_investigation_endpoints_and_global_entity_write_removed(
+    db_session: AsyncSession,
+) -> None:
     async def session_override() -> AsyncIterator[AsyncSession]:
         yield db_session
 
@@ -43,14 +45,7 @@ async def test_minimal_investigation_and_entity_endpoints(db_session: AsyncSessi
                     "metadata": {"country": "AR"},
                 },
             )
-            assert entity_response.status_code == 201
-            entity = entity_response.json()
-            assert entity["normalized_name"] == "acme holdings"
-            assert entity["aliases"][0]["normalized_alias"] == "acme"
-
-            entity_get = await client.get(f"/api/entities/{entity['id']}")
-            assert entity_get.status_code == 200
-            assert entity_get.json()["metadata"] == {"country": "AR"}
+            assert entity_response.status_code == 404
 
             assert (
                 await client.get(f"/api/entities/{'0' * 8}-0000-0000-0000-000000000000")
@@ -58,6 +53,6 @@ async def test_minimal_investigation_and_entity_endpoints(db_session: AsyncSessi
             invalid = await client.post(
                 "/api/entities", json={"type": "INVALID", "canonical_name": "X"}
             )
-            assert invalid.status_code == 422
+            assert invalid.status_code == 404
     finally:
         app.dependency_overrides.clear()

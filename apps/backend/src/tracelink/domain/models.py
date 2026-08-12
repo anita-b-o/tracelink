@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Computed,
     DateTime,
@@ -32,6 +33,7 @@ from tracelink.domain.enums import (
     InvestigationReportStatus,
     InvestigationReportType,
     InvestigationStatus,
+    OutboxStatus,
     RelationshipCandidateStatus,
     RelationshipClaimKind,
     RelationshipType,
@@ -66,8 +68,56 @@ class TimestampMixin:
     )
 
 
+class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "users"
+
+    email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(100))
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true", nullable=False
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    investigations: Mapped[list[Investigation]] = relationship(back_populates="user")
+    sessions: Mapped[list[AuthSession]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class AuthSession(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "auth_sessions"
+    __table_args__ = (Index("ix_auth_sessions_user_active", "user_id", "revoked_at", "expires_at"),)
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    user_agent_hash: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="sessions")
+
+
 class Investigation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "investigations"
+    __table_args__ = (
+        CheckConstraint("user_id IS NOT NULL", name="user_required"),
+        Index("ix_investigations_user_created", "user_id", "created_at", "id"),
+    )
+
+    user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
 
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     original_query: Mapped[str] = mapped_column(Text, nullable=False)
@@ -77,6 +127,8 @@ class Investigation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
+
+    user: Mapped[User | None] = relationship(back_populates="investigations")
 
     tasks: Mapped[list[ResearchTask]] = relationship(
         back_populates="investigation", cascade="all, delete-orphan", passive_deletes=True
@@ -703,3 +755,49 @@ class InvestigationReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     investigation: Mapped[Investigation] = relationship(back_populates="reports")
     subject_entity: Mapped[Entity | None] = relationship()
+
+
+class AuditEvent(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_user_created", "user_id", "created_at"),
+        Index("ix_audit_events_resource", "resource_type", "resource_id", "created_at"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    action: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    resource_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    resource_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    metadata_: Mapped[JsonObject] = mapped_column(
+        "metadata", JSONB, default=dict, server_default="{}", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class OutboxEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "outbox_events"
+    __table_args__ = (
+        CheckConstraint("attempts >= 0", name="attempts_non_negative"),
+        Index("ix_outbox_events_dispatch", "status", "next_attempt_at", "created_at"),
+    )
+
+    task_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    payload: Mapped[JsonObject] = mapped_column(JSONB, nullable=False)
+    status: Mapped[OutboxStatus] = mapped_column(
+        enum_type(OutboxStatus, "outbox_status"),
+        default=OutboxStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    request_id: Mapped[str | None] = mapped_column(String(64))

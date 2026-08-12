@@ -16,7 +16,7 @@ from tracelink.domain.enums import (
     EntityResolutionDecision,
     EntityType,
 )
-from tracelink.domain.models import Entity, EntityAlias, EntityMention, JsonObject
+from tracelink.domain.models import Entity, EntityAlias, EntityMention, Investigation, JsonObject
 from tracelink.domain.normalization import NormalizedEntityName, normalize_entity_name
 from tracelink.repositories.entities import EntityRepository
 from tracelink.repositories.entity_mentions import EntityResolutionCandidateRepository
@@ -73,20 +73,29 @@ class EntityCandidateGenerator:
         self.session = session
 
     async def generate(
-        self, entity_type: EntityType, comparison_key: str, *, limit: int = 25
+        self,
+        entity_type: EntityType,
+        comparison_key: str,
+        *,
+        user_id: UUID,
+        limit: int = 25,
     ) -> list[GeneratedEntityCandidate]:
         threshold = 0.30
         entity_similarity = func.similarity(Entity.comparison_key, comparison_key)
         entity_rows = await self.session.execute(
             select(Entity, entity_similarity.label("similarity"))
+            .join(EntityMention, EntityMention.entity_id == Entity.id)
+            .join(Investigation, Investigation.id == EntityMention.investigation_id)
             .options(selectinload(Entity.aliases))
             .where(
                 Entity.type == entity_type,
+                Investigation.user_id == user_id,
                 or_(
                     Entity.comparison_key == comparison_key,
                     entity_similarity >= threshold,
                 ),
             )
+            .distinct()
             .order_by(entity_similarity.desc(), Entity.created_at, Entity.id)
             .limit(limit)
         )
@@ -99,14 +108,18 @@ class EntityCandidateGenerator:
         alias_rows = await self.session.execute(
             select(Entity, EntityAlias.comparison_key, alias_similarity.label("similarity"))
             .join(EntityAlias, EntityAlias.entity_id == Entity.id)
+            .join(EntityMention, EntityMention.entity_id == Entity.id)
+            .join(Investigation, Investigation.id == EntityMention.investigation_id)
             .options(selectinload(Entity.aliases))
             .where(
                 Entity.type == entity_type,
+                Investigation.user_id == user_id,
                 or_(
                     EntityAlias.comparison_key == comparison_key,
                     alias_similarity >= threshold,
                 ),
             )
+            .distinct()
             .order_by(alias_similarity.desc(), Entity.created_at, Entity.id)
             .limit(limit)
         )
@@ -235,7 +248,16 @@ class EntityResolutionService:
                 )
             )
         )
-        generated = await self.generator.generate(mention.entity_type, normalized.comparison_key)
+        user_id = await self.session.scalar(
+            select(Investigation.user_id).where(Investigation.id == mention.investigation_id)
+        )
+        if user_id is None:
+            raise ValueError("entity resolution requires an owned investigation")
+        generated = await self.generator.generate(
+            mention.entity_type,
+            normalized.comparison_key,
+            user_id=user_id,
+        )
         scored = [
             (candidate, *self._score(candidate, normalized, attributes)) for candidate in generated
         ]

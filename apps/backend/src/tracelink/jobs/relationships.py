@@ -14,6 +14,8 @@ from tracelink.jobs.celery_app import celery_app
 from tracelink.services.document_relationship_processing import (
     DocumentRelationshipProcessingService,
 )
+from tracelink.services.outbox import enqueue_task
+from tracelink.services.ownership import require_owned_investigation
 from tracelink.services.relationship_extraction_providers import (
     get_relationship_extraction_provider,
 )
@@ -21,12 +23,21 @@ from tracelink.services.relationship_extraction_providers import (
 logger = logging.getLogger(__name__)
 
 
-async def process_document_relationships_async(investigation_id: UUID, document_id: UUID) -> None:
+async def process_document_relationships_async(
+    investigation_id: UUID, document_id: UUID, downstream_queue: str | None = None
+) -> None:
     settings = get_settings()
     async with get_session_factory()() as session, session.begin():
+        await require_owned_investigation(session, investigation_id)
         candidates = await DocumentRelationshipProcessingService(
             session, settings, get_relationship_extraction_provider()
         ).process(investigation_id, document_id)
+        await enqueue_task(
+            session,
+            "tracelink.index_document_for_retrieval",
+            [str(investigation_id), str(document_id)],
+            queue=downstream_queue,
+        )
     logger.info(
         "document relationship extraction completed",
         extra={
@@ -51,15 +62,15 @@ def process_document_relationships(
     document_id: str,
 ) -> None:
     try:
-        async_worker_runtime.run(
-            process_document_relationships_async(UUID(investigation_id), UUID(document_id))
-        )
-        from tracelink.jobs.rag import index_document_for_retrieval
-
         delivery_info = self.request.delivery_info or {}
         routing_key = delivery_info.get("routing_key")
-        options = {"queue": routing_key} if routing_key else {}
-        index_document_for_retrieval.apply_async(args=[investigation_id, document_id], **options)
+        async_worker_runtime.run(
+            process_document_relationships_async(
+                UUID(investigation_id),
+                UUID(document_id),
+                str(routing_key) if routing_key else None,
+            )
+        )
     except (OperationalError, TransientRelationshipExtractionProviderError) as exc:
         settings = get_settings()
         raise self.retry(

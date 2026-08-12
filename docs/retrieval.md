@@ -29,9 +29,9 @@ ofrece todavía una ganancia demostrada y puede degradar recall post-filter. Ree
 con `EXPLAIN (ANALYZE, BUFFERS)` y el fixture de integración; no se fijan límites temporales
 frágiles en CI.
 
-Baseline local de Fase 6 (PostgreSQL 17 + pgvector, fake provider, 10 de agosto de 2026): 100
-Documents produjeron 500 chunks/embeddings en 2,252 s; retrieval híbrido top-10 end-to-end tomó
-51,431 ms. El `EXPLAIN (ANALYZE, BUFFERS)` aislado por Investigation examinó 500 filas vectoriales
-y ejecutó en 3,373 ms, usando los índices de provider/model y
+Baseline revalidado en Fase 8 (PostgreSQL 17 + pgvector, fake provider, 11 de agosto de 2026): 100
+Documents produjeron 500 chunks/embeddings en 1,903 s; retrieval híbrido top-10 end-to-end tomó
+44,949 ms. El `EXPLAIN (ANALYZE, BUFFERS)` aislado por Investigation examinó 500 filas vectoriales
+y ejecutó en 3,311 ms, usando los índices de provider/model y
 `investigation_id/document_id`. Los tiempos son orientativos, no umbrales de CI; el test
 reproducible es `tests/integration/test_rag_performance.py`.

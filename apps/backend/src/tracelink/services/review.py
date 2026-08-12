@@ -119,17 +119,21 @@ class EntityCandidateReviewService:
 
         await self.session.execute(
             update(EntityMention)
-            .where(EntityMention.entity_id == provisional.id)
+            .where(
+                EntityMention.entity_id == provisional.id,
+                EntityMention.investigation_id == candidate.investigation_id,
+            )
             .values(entity_id=target.id)
         )
         dependent_candidates = list(
             await self.session.scalars(
                 select(RelationshipCandidate)
                 .where(
+                    RelationshipCandidate.investigation_id == candidate.investigation_id,
                     or_(
                         RelationshipCandidate.source_entity_id == provisional.id,
                         RelationshipCandidate.target_entity_id == provisional.id,
-                    )
+                    ),
                 )
                 .with_for_update()
             )
@@ -173,14 +177,19 @@ class EntityCandidateReviewService:
             dependent.source_entity_id = source_id
             dependent.target_entity_id = target_id
 
+        relationship_ids = select(Evidence.relationship_id).where(
+            Evidence.investigation_id == candidate.investigation_id,
+            Evidence.relationship_id.is_not(None),
+        )
         relationships = list(
             await self.session.scalars(
                 select(Relationship)
                 .where(
+                    Relationship.id.in_(relationship_ids),
                     or_(
                         Relationship.source_entity_id == provisional.id,
                         Relationship.target_entity_id == provisional.id,
-                    )
+                    ),
                 )
                 .with_for_update()
             )
@@ -203,27 +212,36 @@ class EntityCandidateReviewService:
             if source_id == target_id:
                 await self.session.execute(
                     update(Evidence)
-                    .where(Evidence.relationship_id == relationship.id)
+                    .where(
+                        Evidence.relationship_id == relationship.id,
+                        Evidence.investigation_id == candidate.investigation_id,
+                    )
                     .values(relationship_id=None, entity_id=target.id)
                 )
-                await self.session.delete(relationship)
                 continue
-            existing = await repository.get_by_identity(source_id, target_id, relationship.type)
-            if existing is not None and existing.id != relationship.id:
+            if (
+                source_id != relationship.source_entity_id
+                or target_id != relationship.target_entity_id
+            ):
+                existing = await repository.upsert(
+                    source_entity_id=source_id,
+                    target_entity_id=target_id,
+                    relationship_type=relationship.type,
+                    confidence=relationship.confidence,
+                    status=relationship.status,
+                    observed_at=now,
+                    temporal_start=relationship.temporal_start,
+                    temporal_end=relationship.temporal_end,
+                    metadata={"entity_resolution_candidate_id": str(candidate.id)},
+                )
                 await self.session.execute(
                     update(Evidence)
-                    .where(Evidence.relationship_id == relationship.id)
+                    .where(
+                        Evidence.relationship_id == relationship.id,
+                        Evidence.investigation_id == candidate.investigation_id,
+                    )
                     .values(relationship_id=existing.id)
                 )
-                existing.confidence = max(existing.confidence, relationship.confidence)
-                if relationship.status is AssertionStatus.CONTRADICTED:
-                    existing.status = AssertionStatus.CONTRADICTED
-                existing.temporal_start = existing.temporal_start or relationship.temporal_start
-                existing.temporal_end = relationship.temporal_end or existing.temporal_end
-                await self.session.delete(relationship)
-            else:
-                relationship.source_entity_id = source_id
-                relationship.target_entity_id = target_id
 
         provisional.metadata_ = {
             **provisional.metadata_,

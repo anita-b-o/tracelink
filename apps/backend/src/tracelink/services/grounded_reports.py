@@ -25,6 +25,7 @@ from tracelink.domain.models import (
     Relationship,
 )
 from tracelink.domain.rag import RetrievalFilters
+from tracelink.observability.metrics import LLM_CALLS
 from tracelink.repositories.reports import InvestigationReportRepository
 from tracelink.services.citations import CitationValidator
 from tracelink.services.errors import DomainConflictError, DomainNotFoundError
@@ -227,11 +228,16 @@ class InvestigationReportService:
                 "citations": [],
             }
         else:
-            generated = await self.llm_provider.generate_report(
-                report.type.value,
-                context,
-                subject.canonical_name if subject else None,
-            )
+            try:
+                generated = await self.llm_provider.generate_report(
+                    report.type.value,
+                    context,
+                    subject.canonical_name if subject else None,
+                )
+            except Exception:
+                LLM_CALLS.labels(self.llm_provider.provider_name, "failure").inc()
+                raise
+            LLM_CALLS.labels(self.llm_provider.provider_name, "success").inc()
             claims = list(generated.summary_claims)
             for section in generated.sections:
                 claims.extend(section.claims)

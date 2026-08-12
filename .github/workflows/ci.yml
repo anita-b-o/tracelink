@@ -38,7 +38,8 @@ jobs:
       run:
         working-directory: apps/backend
     env:
-      ENVIRONMENT: test
+      APP_ENV: test
+      TEST_AUTH_BYPASS: "true"
       DATABASE_URL: postgresql+psycopg://tracelink:tracelink_test@localhost:5432/tracelink_test
       TEST_DATABASE_URL: postgresql+psycopg://tracelink:tracelink_test@localhost:5432/tracelink_test
       REDIS_URL: redis://localhost:6379/0
@@ -67,6 +68,33 @@ jobs:
           alembic upgrade head
           alembic check
           pytest
+      - name: Backup and restore smoke
+        working-directory: ${{ github.workspace }}
+        run: |
+          backup_dir="$(mktemp -d)"
+          docker run --rm --network host \
+            -e DATABASE_URL=postgresql://tracelink:tracelink_test@127.0.0.1:5432/tracelink_test \
+            -e BACKUP_DIR=/backup -e ALEMBIC_REVISION=0008_auth_hardening \
+            -v "$GITHUB_WORKSPACE/scripts:/scripts:ro" -v "$backup_dir:/backup" \
+            pgvector/pgvector:pg17 bash /scripts/backup.sh
+          docker run --rm --network host pgvector/pgvector:pg17 \
+            psql postgresql://tracelink:tracelink_test@127.0.0.1:5432/postgres \
+            -v ON_ERROR_STOP=1 -c 'DROP DATABASE IF EXISTS tracelink_restore_ci' \
+            -c 'CREATE DATABASE tracelink_restore_ci'
+          archive="$(find "$backup_dir" -maxdepth 1 -name '*.dump' -print -quit)"
+          docker run --rm --network host \
+            -e RESTORE_DATABASE_URL=postgresql://tracelink:tracelink_test@127.0.0.1:5432/tracelink_restore_ci \
+            -e RESTORE_CONFIRM=RESTORE \
+            -v "$GITHUB_WORKSPACE/scripts:/scripts:ro" -v "$backup_dir:/backup" \
+            pgvector/pgvector:pg17 bash /scripts/restore.sh "/backup/$(basename "$archive")"
+          docker run --rm --network host pgvector/pgvector:pg17 \
+            psql postgresql://tracelink:tracelink_test@127.0.0.1:5432/tracelink_restore_ci \
+            -Atv ON_ERROR_STOP=1 -c "SELECT version_num FROM alembic_version" \
+            -c "SELECT string_agg(extname, ',' ORDER BY extname) FROM pg_extension WHERE extname IN ('vector','pg_trgm')"
+          docker run --rm --network host pgvector/pgvector:pg17 \
+            psql postgresql://tracelink:tracelink_test@127.0.0.1:5432/postgres \
+            -v ON_ERROR_STOP=1 -c 'DROP DATABASE tracelink_restore_ci'
+          rm -rf "$backup_dir"
 
   frontend:
     runs-on: ubuntu-latest
@@ -114,7 +142,7 @@ jobs:
       - name: Start isolated workspace stack
         run: >-
           docker compose -p tracelink-e2e -f compose.yaml -f compose.e2e.yaml
-          up --build --detach --wait postgres redis backend worker frontend
+          up --build --detach --wait postgres redis backend worker outbox frontend
       - name: Seed review fixture
         run: >-
           docker compose -p tracelink-e2e -f compose.yaml -f compose.e2e.yaml
@@ -138,37 +166,87 @@ jobs:
         run: docker compose up --build --detach --wait --wait-timeout 240
       - name: Verify public endpoints
         run: |
-          docker compose exec -T backend alembic upgrade head
           curl --fail --silent --show-error http://localhost:3000 > /dev/null
           curl --fail --silent --show-error http://localhost:8000/api/health/live > /dev/null
           curl --fail --silent --show-error http://localhost:8000/api/health/ready > /dev/null
           curl --fail --silent --show-error http://localhost:8000/openapi.json > /dev/null
-          curl --fail --silent --show-error \
-            --header 'Content-Type: application/json' \
-            --data '{"title":"CI smoke","original_query":"Verify core domain"}' \
-            http://localhost:8000/api/investigations > /tmp/investigation.json
-          investigation_id=$(python -c \
-            'import json; print(json.load(open("/tmp/investigation.json"))["id"])')
-          curl --fail --silent --show-error --request POST \
-            "http://localhost:8000/api/investigations/${investigation_id}/start" > /dev/null
-          for attempt in $(seq 1 30); do
-            curl --fail --silent --show-error \
-              "http://localhost:8000/api/investigations/${investigation_id}/progress" \
-              > /tmp/progress.json
-            percent=$(python -c \
-              'import json; print(json.load(open("/tmp/progress.json"))["percent"])')
-            if [ "$percent" = "100" ]; then break; fi
-            sleep 1
-          done
-          test "$percent" = "100"
-          status=$(curl --fail --silent --show-error \
-            "http://localhost:8000/api/investigations/${investigation_id}" | \
-            python -c 'import json,sys; print(json.load(sys.stdin)["status"])')
-          test "$status" = "COMPLETED"
-          curl --fail --silent --show-error http://localhost:8000/api/investigations > /dev/null
+      - name: Verify versioned OpenAPI contract
+        run: >-
+          docker compose exec -T frontend sh -c
+          'npx openapi-typescript http://backend:8000/openapi.json -o /tmp/schema.d.ts
+          && diff -u src/lib/api/schema.d.ts /tmp/schema.d.ts'
       - name: Show logs on failure
         if: failure()
         run: docker compose logs --no-color
       - name: Stop the stack
         if: always()
         run: docker compose down --volumes --remove-orphans
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/backend/requirements-dev.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+      - name: Audit Python dependencies and source
+        working-directory: apps/backend
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-dev.lock
+          pip-audit -r requirements.lock
+          bandit -q -r src -ll
+      - name: Audit frontend dependencies
+        working-directory: apps/frontend
+        run: |
+          npm ci
+          npm audit --audit-level=high
+      - name: Scan committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  production-images:
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_PASSWORD: ci-only-password
+      AUTH_JWT_SECRET: ci-auth-secret-at-least-32-characters
+      AUTH_TOKEN_PEPPER: ci-token-pepper-at-least-32-characters
+      CORS_ALLOWED_ORIGINS: https://tracelink-staging.example.com
+      ALLOWED_HOSTS: tracelink-api-staging.internal,backend,127.0.0.1
+      METRICS_BEARER_TOKEN: ci-metrics-secret-at-least-32-chars
+      OPENAI_API_KEY: ci-placeholder
+      REGISTRATION_ENABLED: "true"
+      IMAGE_TAG: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate staging composition
+        run: docker compose -f compose.yaml -f compose.staging.yaml config --quiet
+      - name: Build production images
+        run: |
+          docker build --target production -f infra/docker/backend.Dockerfile -t tracelink-backend:staging .
+          docker build --build-arg APP_ENV=staging --target production -f infra/docker/frontend.Dockerfile -t tracelink-frontend:staging .
+      - name: Start production artifacts as staging
+        run: >-
+          docker compose -p tracelink-staging-ci -f compose.yaml -f compose.staging.yaml
+          up --no-build --detach --wait --wait-timeout 240
+      - name: Smoke staging gateway
+        run: curl --fail --silent --show-error http://localhost:3000/api/health/ready > /dev/null
+      - name: Show staging logs on failure
+        if: failure()
+        run: >-
+          docker compose -p tracelink-staging-ci -f compose.yaml -f compose.staging.yaml
+          logs --no-color
+      - name: Stop staging stack
+        if: always()
+        run: >-
+          docker compose -p tracelink-staging-ci -f compose.yaml -f compose.staging.yaml
+          down --volumes --remove-orphans

@@ -5,11 +5,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tracelink.api.authorization import AuthorizationService
+from tracelink.api.dependencies import CurrentUser
 from tracelink.api.routes.workspace import candidate_read
 from tracelink.api.schemas.entities import EntityResolutionCandidateRead
 from tracelink.api.schemas.relationships import RelationshipCandidateRead
 from tracelink.domain.models import RelationshipCandidate
 from tracelink.infrastructure.database import get_session
+from tracelink.services.audit import AuditService
 from tracelink.services.errors import DomainConflictError, DomainNotFoundError
 from tracelink.services.review import (
     EntityCandidateReviewService,
@@ -21,10 +24,22 @@ Session = Annotated[AsyncSession, Depends(get_session)]
 
 
 async def execute_review(
-    session: AsyncSession, operation: Callable[[], Awaitable[object]]
+    session: AsyncSession,
+    operation: Callable[[], Awaitable[object]],
+    *,
+    user_id: UUID,
+    action: str,
+    resource_type: str,
+    resource_id: UUID,
 ) -> object:
     try:
         result = await operation()
+        await AuditService(session).record(
+            user_id=user_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+        )
         await session.commit()
         return result
     except DomainNotFoundError as exc:
@@ -39,9 +54,17 @@ async def execute_review(
     "/entity-resolution-candidates/{candidate_id}/accept",
     response_model=EntityResolutionCandidateRead,
 )
-async def accept_entity_candidate(candidate_id: UUID, session: Session) -> object:
+async def accept_entity_candidate(
+    candidate_id: UUID, session: Session, current_user: CurrentUser
+) -> object:
+    await AuthorizationService(session, current_user.id).entity_candidate(candidate_id)
     return await execute_review(
-        session, lambda: EntityCandidateReviewService(session).accept(candidate_id)
+        session,
+        lambda: EntityCandidateReviewService(session).accept(candidate_id),
+        user_id=current_user.id,
+        action="entity_resolution.accept",
+        resource_type="entity_resolution_candidate",
+        resource_id=candidate_id,
     )
 
 
@@ -49,9 +72,17 @@ async def accept_entity_candidate(candidate_id: UUID, session: Session) -> objec
     "/entity-resolution-candidates/{candidate_id}/reject",
     response_model=EntityResolutionCandidateRead,
 )
-async def reject_entity_candidate(candidate_id: UUID, session: Session) -> object:
+async def reject_entity_candidate(
+    candidate_id: UUID, session: Session, current_user: CurrentUser
+) -> object:
+    await AuthorizationService(session, current_user.id).entity_candidate(candidate_id)
     return await execute_review(
-        session, lambda: EntityCandidateReviewService(session).reject(candidate_id)
+        session,
+        lambda: EntityCandidateReviewService(session).reject(candidate_id),
+        user_id=current_user.id,
+        action="entity_resolution.reject",
+        resource_type="entity_resolution_candidate",
+        resource_id=candidate_id,
     )
 
 
@@ -66,11 +97,19 @@ async def relationship_response(
     "/relationship-candidates/{candidate_id}/accept",
     response_model=RelationshipCandidateRead,
 )
-async def accept_relationship_candidate(candidate_id: UUID, session: Session) -> object:
+async def accept_relationship_candidate(
+    candidate_id: UUID, session: Session, current_user: CurrentUser
+) -> object:
+    await AuthorizationService(session, current_user.id).relationship_candidate(candidate_id)
     candidate = cast(
         RelationshipCandidate,
         await execute_review(
-            session, lambda: RelationshipCandidateReviewService(session).accept(candidate_id)
+            session,
+            lambda: RelationshipCandidateReviewService(session).accept(candidate_id),
+            user_id=current_user.id,
+            action="relationship_review.accept",
+            resource_type="relationship_candidate",
+            resource_id=candidate_id,
         ),
     )
     return await relationship_response(session, candidate)
@@ -80,11 +119,19 @@ async def accept_relationship_candidate(candidate_id: UUID, session: Session) ->
     "/relationship-candidates/{candidate_id}/reject",
     response_model=RelationshipCandidateRead,
 )
-async def reject_relationship_candidate(candidate_id: UUID, session: Session) -> object:
+async def reject_relationship_candidate(
+    candidate_id: UUID, session: Session, current_user: CurrentUser
+) -> object:
+    await AuthorizationService(session, current_user.id).relationship_candidate(candidate_id)
     candidate = cast(
         RelationshipCandidate,
         await execute_review(
-            session, lambda: RelationshipCandidateReviewService(session).reject(candidate_id)
+            session,
+            lambda: RelationshipCandidateReviewService(session).reject(candidate_id),
+            user_id=current_user.id,
+            action="relationship_review.reject",
+            resource_type="relationship_candidate",
+            resource_id=candidate_id,
         ),
     )
     return await relationship_response(session, candidate)
