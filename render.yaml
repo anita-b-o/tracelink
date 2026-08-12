@@ -6,6 +6,7 @@ services:
     dockerContext: .
     dockerCommand: node server.js
     autoDeployTrigger: off
+    healthCheckPath: /api/health/ready
     envVars:
       - key: APP_ENV
         value: production
@@ -18,7 +19,6 @@ services:
     dockerContext: .
     autoDeployTrigger: off
     preDeployCommand: alembic upgrade head
-    healthCheckPath: /api/health/ready
     envVars:
       - key: APP_ENV
         value: production
