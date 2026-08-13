@@ -44,6 +44,7 @@ def _demo_settings(**overrides: object) -> Settings:
         "embedding_provider": "openai",
         "llm_provider": "openai",
         "openai_api_key": "placeholder-for-validation",
+        "test_auth_bypass": False,
         "outbox_batch_size": 1,
         "outbox_lease_seconds": 360,
     }
@@ -63,6 +64,7 @@ def test_demo_configuration_is_explicit_and_isolated() -> None:
 
     assert settings.app_env == "demo"
     assert settings.demo_mode is True
+    assert settings.test_auth_bypass is False
     assert settings.secure_cookies is True
     assert settings.registration_is_enabled is True
     assert settings.allowed_host_list == [
@@ -75,6 +77,8 @@ def test_demo_configuration_is_explicit_and_isolated() -> None:
             _production_settings(app_env=app_env, demo_mode=True)
     with pytest.raises(ValidationError, match="required only when APP_ENV=demo"):
         _demo_settings(demo_mode=False)
+    with pytest.raises(ValidationError, match="only allowed in test"):
+        _demo_settings(test_auth_bypass=True)
 
 
 def test_demo_configuration_keeps_deployment_security_invariants() -> None:
