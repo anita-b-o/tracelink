@@ -20,6 +20,7 @@ COPY apps/backend/requirements.lock ./requirements.lock
 RUN python -m pip install --no-cache-dir -r requirements.lock
 COPY apps/backend/pyproject.toml apps/backend/alembic.ini ./
 COPY apps/backend/src ./src
+COPY infra/docker/start-demo-api.sh /usr/local/bin/start-demo-api
 RUN python -m pip install --no-deps .
 USER tracelink
 EXPOSE 8000

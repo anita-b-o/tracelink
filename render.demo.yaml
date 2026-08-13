@@ -33,9 +33,7 @@ services:
     plan: free
     dockerfilePath: ./infra/docker/backend.Dockerfile
     dockerContext: .
-    dockerCommand: >-
-      /bin/sh -c 'alembic upgrade head && exec uvicorn tracelink.main:app
-      --host 0.0.0.0 --port 8000'
+    dockerCommand: /usr/local/bin/start-demo-api
     autoDeployTrigger: off
     healthCheckPath: /api/health/ready
     envVars:
