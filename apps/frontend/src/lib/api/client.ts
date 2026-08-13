@@ -1,6 +1,24 @@
 import type { Answer, DocumentDetail, DocumentSummary, Entity, EntityCandidate, Evidence, GraphData, Investigation, Mention, Progress, Relationship, RelationshipCandidate, RelationshipDetail, Report, ReportSummary, ReportType, SearchHit, Source, Task } from "./types";
 
-const DEFAULT_TIMEOUT_MS = 15_000;
+type DemoEnvironment = { NEXT_PUBLIC_DEMO_MODE?: string };
+
+export function isDemoEnvironment(
+  environment: DemoEnvironment = process.env as DemoEnvironment,
+): boolean {
+  return environment.NEXT_PUBLIC_DEMO_MODE === "true";
+}
+
+export function defaultApiTimeoutMs(environment?: DemoEnvironment): number {
+  return isDemoEnvironment(environment) ? 90_000 : 15_000;
+}
+
+export function timeoutMessage(timeoutMs: number, environment?: DemoEnvironment): string {
+  if (isDemoEnvironment(environment)) {
+    return `The free demo API may still be waking up after ${Math.round(timeoutMs / 1000)} seconds. Wait a moment and retry.`;
+  }
+  return `The TraceLink API did not respond within ${Math.round(timeoutMs / 1000)} seconds.`;
+}
+
 let refreshPromise: Promise<boolean> | null = null;
 
 function cookie(name: string): string | null {
@@ -48,7 +66,7 @@ function validationMessages(detail: unknown): string[] {
   });
 }
 
-export async function apiRequest<T>(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS, allowRefresh = true): Promise<T> {
+export async function apiRequest<T>(path: string, init: RequestInit = {}, timeoutMs = defaultApiTimeoutMs(), allowRefresh = true): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("timeout"), timeoutMs);
   try {
@@ -59,7 +77,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}, timeou
       if (init.method && !["GET", "HEAD"].includes(init.method.toUpperCase())) headers.set("X-CSRF-Token", await csrfToken());
       response = await fetch(path, { ...init, credentials: "same-origin", headers, signal: controller.signal });
     } catch {
-      if (controller.signal.aborted) throw new ApiError(`The TraceLink API did not respond within ${Math.round(timeoutMs / 1000)} seconds.`, null, "timeout");
+      if (controller.signal.aborted) throw new ApiError(timeoutMessage(timeoutMs), null, "timeout");
       throw new ApiError("Cannot reach the TraceLink API.", null, "network");
     }
     if (response.status === 401 && allowRefresh && !path.startsWith("/api/auth/")) {

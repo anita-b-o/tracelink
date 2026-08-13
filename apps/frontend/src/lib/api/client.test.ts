@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, apiRequest } from "./client";
+import {
+  ApiError,
+  apiRequest,
+  defaultApiTimeoutMs,
+  isDemoEnvironment,
+  timeoutMessage,
+} from "./client";
 
 describe("API client", () => {
   afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -36,6 +42,18 @@ describe("API client", () => {
     const pending=apiRequest("/test",{},25).catch(error=>error as ApiError);
     await vi.advanceTimersByTimeAsync(25);
     await expect(pending).resolves.toMatchObject({kind:"timeout",status:null});
+  });
+
+  it("uses a longer timeout and explicit cold-start guidance only for demo", () => {
+    const demo = { NEXT_PUBLIC_DEMO_MODE: "true" };
+    const normal = { NEXT_PUBLIC_DEMO_MODE: "false" };
+
+    expect(isDemoEnvironment(demo)).toBe(true);
+    expect(defaultApiTimeoutMs(demo)).toBe(90_000);
+    expect(timeoutMessage(90_000, demo)).toContain("free demo API may still be waking up");
+    expect(isDemoEnvironment(normal)).toBe(false);
+    expect(defaultApiTimeoutMs(normal)).toBe(15_000);
+    expect(timeoutMessage(15_000, normal)).not.toContain("free demo");
   });
 
   it("rejects malformed successful responses", async () => {

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { backendInternalUrl } from "@/lib/backend-url";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -8,7 +10,7 @@ const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "cookie", "origin",
 const FORWARDED_RESPONSE_HEADERS = ["content-type", "cache-control", "retry-after", "x-request-id"];
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
-  const backend = process.env.BACKEND_INTERNAL_URL;
+  const backend = backendInternalUrl();
   if (!backend) return NextResponse.json({ detail: "backend unavailable" }, { status: 503 });
   const { path } = await context.params;
   const safePath = path.map((segment) => encodeURIComponent(segment)).join("/");

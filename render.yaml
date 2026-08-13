@@ -1,3 +1,11 @@
+envVarGroups:
+  - name: tracelink-staging-auth
+    envVars:
+      - key: AUTH_JWT_SECRET
+        generateValue: true
+      - key: AUTH_TOKEN_PEPPER
+        generateValue: true
+
 services:
   - type: web
     name: tracelink-web
@@ -9,9 +17,12 @@ services:
     healthCheckPath: /api/health/ready
     envVars:
       - key: APP_ENV
-        value: production
-      - key: BACKEND_INTERNAL_URL
-        sync: false
+        value: staging
+      - key: BACKEND_INTERNAL_HOSTPORT
+        fromService:
+          type: pserv
+          name: tracelink-api
+          property: hostport
   - type: pserv
     name: tracelink-api
     runtime: docker
@@ -21,7 +32,7 @@ services:
     preDeployCommand: alembic upgrade head
     envVars:
       - key: APP_ENV
-        value: production
+        value: staging
       - key: DATABASE_URL
         fromDatabase:
           name: tracelink-postgres
@@ -31,20 +42,23 @@ services:
           type: keyvalue
           name: tracelink-redis
           property: connectionString
-      - key: AUTH_JWT_SECRET
-        sync: false
-      - key: AUTH_TOKEN_PEPPER
-        sync: false
+      - fromGroup: tracelink-staging-auth
       - key: CORS_ALLOWED_ORIGINS
-        sync: false
+        fromService:
+          type: web
+          name: tracelink-web
+          envVarKey: RENDER_EXTERNAL_URL
       - key: ALLOWED_HOSTS
-        sync: false
+        fromService:
+          type: pserv
+          name: tracelink-api
+          property: host
       - key: COOKIE_SECURE
         value: "true"
       - key: REGISTRATION_ENABLED
-        sync: false
+        value: "true"
       - key: METRICS_BEARER_TOKEN
-        sync: false
+        generateValue: true
       - key: EMBEDDING_PROVIDER
         value: openai
       - key: LLM_PROVIDER
@@ -60,7 +74,7 @@ services:
     autoDeployTrigger: off
     envVars:
       - key: APP_ENV
-        value: production
+        value: staging
       - key: DATABASE_URL
         fromDatabase:
           name: tracelink-postgres
@@ -71,18 +85,21 @@ services:
         fromService: {type: keyvalue, name: tracelink-redis, property: connectionString}
       - key: CELERY_RESULT_BACKEND
         fromService: {type: keyvalue, name: tracelink-redis, property: connectionString}
-      - key: AUTH_JWT_SECRET
-        sync: false
-      - key: AUTH_TOKEN_PEPPER
-        sync: false
+      - fromGroup: tracelink-staging-auth
       - key: CORS_ALLOWED_ORIGINS
-        sync: false
+        fromService:
+          type: web
+          name: tracelink-web
+          envVarKey: RENDER_EXTERNAL_URL
       - key: ALLOWED_HOSTS
-        sync: false
+        fromService:
+          type: pserv
+          name: tracelink-api
+          property: host
       - key: COOKIE_SECURE
         value: "true"
       - key: REGISTRATION_ENABLED
-        sync: false
+        value: "true"
       - key: EMBEDDING_PROVIDER
         value: openai
       - key: LLM_PROVIDER
@@ -98,7 +115,7 @@ services:
     autoDeployTrigger: off
     envVars:
       - key: APP_ENV
-        value: production
+        value: staging
       - key: DATABASE_URL
         fromDatabase:
           name: tracelink-postgres
@@ -109,18 +126,21 @@ services:
         fromService: {type: keyvalue, name: tracelink-redis, property: connectionString}
       - key: CELERY_RESULT_BACKEND
         fromService: {type: keyvalue, name: tracelink-redis, property: connectionString}
-      - key: AUTH_JWT_SECRET
-        sync: false
-      - key: AUTH_TOKEN_PEPPER
-        sync: false
+      - fromGroup: tracelink-staging-auth
       - key: CORS_ALLOWED_ORIGINS
-        sync: false
+        fromService:
+          type: web
+          name: tracelink-web
+          envVarKey: RENDER_EXTERNAL_URL
       - key: ALLOWED_HOSTS
-        sync: false
+        fromService:
+          type: pserv
+          name: tracelink-api
+          property: host
       - key: COOKIE_SECURE
         value: "true"
       - key: REGISTRATION_ENABLED
-        sync: false
+        value: "true"
       - key: EMBEDDING_PROVIDER
         value: openai
       - key: LLM_PROVIDER

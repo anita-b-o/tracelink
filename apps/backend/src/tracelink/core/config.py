@@ -13,6 +13,7 @@ from pydantic import (
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEVELOPMENT_ALLOWED_HOSTS = "localhost,127.0.0.1,backend,testserver,test"
+DEPLOYED_APP_ENVS = frozenset({"demo", "staging", "production"})
 
 
 class Settings(BaseSettings):
@@ -24,7 +25,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "TraceLink API"
-    app_env: Literal["development", "test", "staging", "production"] = Field(
+    app_env: Literal["development", "test", "demo", "staging", "production"] = Field(
         default="development", validation_alias=AliasChoices("APP_ENV", "ENVIRONMENT")
     )
     log_level: str = "INFO"
@@ -141,6 +142,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_settings(self) -> "Settings":
+        if self.demo_mode != (self.app_env == "demo"):
+            raise ValueError("DEMO_MODE=true is required only when APP_ENV=demo")
         if self.entity_extraction_chunk_overlap >= self.entity_extraction_chunk_size:
             raise ValueError("entity extraction overlap must be smaller than chunk size")
         if (
@@ -158,6 +161,13 @@ class Settings(BaseSettings):
             raise ValueError("RAG semantic and lexical weights must sum to 1")
         if self.celery_task_soft_time_limit_seconds >= self.celery_task_time_limit_seconds:
             raise ValueError("Celery soft time limit must be lower than hard time limit")
+        if self.app_env == "demo" and self.outbox_batch_size != 1:
+            raise ValueError("demo outbox processing requires OUTBOX_BATCH_SIZE=1")
+        if (
+            self.app_env == "demo"
+            and self.outbox_lease_seconds <= self.celery_task_time_limit_seconds
+        ):
+            raise ValueError("demo outbox lease must exceed the task hard time limit")
         if (self.embedding_provider == "openai" or self.llm_provider == "openai") and (
             self.openai_api_key is None or not self.openai_api_key.get_secret_value().strip()
         ):
@@ -174,27 +184,25 @@ class Settings(BaseSettings):
                 or parsed.path not in {"", "/"}
             ):
                 raise ValueError("CORS_ALLOWED_ORIGINS must contain exact HTTP(S) origins")
-        if self.app_env in {"staging", "production"}:
+        if self.app_env in DEPLOYED_APP_ENVS:
             if self.allowed_hosts == DEVELOPMENT_ALLOWED_HOSTS:
-                raise ValueError("ALLOWED_HOSTS must be explicit in staging/production")
+                raise ValueError("ALLOWED_HOSTS must be explicit in deployed environments")
             if "127.0.0.1" not in self.allowed_host_list:
                 raise ValueError("ALLOWED_HOSTS must include 127.0.0.1 for container healthchecks")
             if self.registration_enabled is None:
-                raise ValueError("REGISTRATION_ENABLED must be explicit in staging/production")
+                raise ValueError("REGISTRATION_ENABLED must be explicit in deployed environments")
             jwt_secret = self.auth_jwt_secret.get_secret_value()
             pepper = self.auth_token_pepper.get_secret_value()
             if len(jwt_secret.encode()) < 32 or len(pepper.encode()) < 32 or jwt_secret == pepper:
                 raise ValueError("production auth secrets must be distinct and at least 32 bytes")
             if self.cookie_secure is False:
-                raise ValueError("secure cookies cannot be disabled in staging/production")
+                raise ValueError("secure cookies cannot be disabled in deployed environments")
             if self.e2e_seed_enabled or self.fake_research_mode is not None:
-                raise ValueError("E2E/fake research modes are forbidden in staging/production")
-            if not self.demo_mode and (
-                self.embedding_provider == "fake" or self.llm_provider == "fake"
-            ):
-                raise ValueError("fake AI providers require DEMO_MODE=true in staging/production")
+                raise ValueError("E2E/fake research modes are forbidden in deployed environments")
+            if self.embedding_provider == "fake" or self.llm_provider == "fake":
+                raise ValueError("fake AI providers are forbidden in deployed environments")
             if any(not origin.startswith("https://") for origin in self.cors_origin_list):
-                raise ValueError("staging/production CORS origins must use HTTPS")
+                raise ValueError("deployed CORS origins must use HTTPS")
         if self.test_auth_bypass and self.app_env != "test":
             raise ValueError("TEST_AUTH_BYPASS is only allowed in test")
         return self
@@ -211,7 +219,10 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def allowed_host_list(self) -> list[str]:
-        return [host.strip() for host in self.allowed_hosts.split(",") if host.strip()]
+        hosts = [host.strip() for host in self.allowed_hosts.split(",") if host.strip()]
+        if self.app_env in DEPLOYED_APP_ENVS and "127.0.0.1" not in hosts:
+            hosts.append("127.0.0.1")
+        return hosts
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -219,7 +230,7 @@ class Settings(BaseSettings):
         return (
             self.cookie_secure
             if self.cookie_secure is not None
-            else self.app_env in {"staging", "production"}
+            else self.app_env in DEPLOYED_APP_ENVS
         )
 
     @computed_field  # type: ignore[prop-decorator]

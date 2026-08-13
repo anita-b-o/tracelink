@@ -10,8 +10,10 @@ Auto-deploy está deshabilitado. Production nunca se despliega desde CI.
 proxy/load balancer administrado termina TLS; Next es el único servicio público y reenvía `/api` al
 backend privado. Debe preservar `X-Forwarded-*` y `X-Request-ID`.
 
-`ALLOWED_HOSTS` debe enumerar el hostname privado real del API, el alias interno usado por Next y
-`127.0.0.1`, reservado al healthcheck del contenedor. No se admite `*`.
+En Render, `BACKEND_INTERNAL_HOSTPORT` y `ALLOWED_HOSTS` se derivan del host privado real del API;
+Next agrega el esquema HTTP para tráfico interno y el backend agrega `127.0.0.1` para el healthcheck
+del contenedor. En otros targets se puede seguir usando `BACKEND_INTERNAL_URL` y hosts explícitos.
+No se admite `*`.
 
 ## Release
 

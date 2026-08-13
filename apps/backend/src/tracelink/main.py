@@ -1,7 +1,8 @@
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 import sentry_sdk
@@ -53,10 +54,24 @@ if settings.sentry_dsn is not None and settings.sentry_dsn.get_secret_value().st
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    yield
-    await close_research_http_client()
-    await close_database()
-    await close_redis()
+    demo_stop: asyncio.Event | None = None
+    demo_task: asyncio.Task[None] | None = None
+    if settings.demo_mode:
+        from tracelink.demo_dispatcher import run_demo_dispatcher
+
+        demo_stop = asyncio.Event()
+        demo_task = asyncio.create_task(run_demo_dispatcher(demo_stop), name="demo-outbox")
+    try:
+        yield
+    finally:
+        if demo_stop is not None and demo_task is not None:
+            demo_stop.set()
+            demo_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await demo_task
+        await close_research_http_client()
+        await close_database()
+        await close_redis()
 
 
 app = FastAPI(

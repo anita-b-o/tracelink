@@ -94,6 +94,7 @@ Los valores predeterminados del backend apuntan a los puertos locales de Postgre
 | `POSTGRES_PASSWORD` | Contraseña local | `tracelink_dev` |
 | `APP_ENV` | `development`, `test`, `staging` o `production` | `development` |
 | `BACKEND_INTERNAL_URL` | API privada consumida por Next | `http://backend:8000` |
+| `BACKEND_INTERNAL_HOSTPORT` | Host y puerto privados derivados por Render cuando no hay URL explícita | vacío |
 | `NEXT_PUBLIC_GRAPH_MAX_NODES` | Límite inicial de nodos React Flow | `250` |
 | `CORS_ALLOWED_ORIGINS` | Orígenes exactos permitidos | `http://localhost:3000` |
 | `LOG_LEVEL` | Nivel de logging del backend y worker | `INFO` |
