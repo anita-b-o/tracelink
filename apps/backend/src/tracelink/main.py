@@ -56,7 +56,7 @@ if settings.sentry_dsn is not None and settings.sentry_dsn.get_secret_value().st
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     demo_stop: asyncio.Event | None = None
     demo_task: asyncio.Task[None] | None = None
-    if settings.demo_mode:
+    if settings.demo_mode and not settings.serverless_runtime:
         from tracelink.demo_dispatcher import run_demo_dispatcher
 
         demo_stop = asyncio.Event()

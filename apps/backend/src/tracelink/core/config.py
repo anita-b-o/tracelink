@@ -95,6 +95,11 @@ class Settings(BaseSettings):
         Literal["SUCCESS", "FAIL_ONCE", "ALWAYS_FAIL", "SLOW", "PIPELINE_SUCCESS"] | None
     ) = None
     demo_mode: bool = False
+    serverless_runtime: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("TRACELINK_SERVERLESS", "serverless_runtime"),
+    )
+    serverless_dispatch_timeout_seconds: float = Field(default=240.0, ge=30, le=270)
     e2e_seed_enabled: bool = False
     test_auth_bypass: bool = False
     research_http_timeout_seconds: float = Field(default=10.0, gt=0, le=120)

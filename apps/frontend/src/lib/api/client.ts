@@ -1,6 +1,9 @@
 import type { Answer, DocumentDetail, DocumentSummary, Entity, EntityCandidate, Evidence, GraphData, Investigation, Mention, Progress, Relationship, RelationshipCandidate, RelationshipDetail, Report, ReportSummary, ReportType, SearchHit, Source, Task } from "./types";
 
-type DemoEnvironment = { NEXT_PUBLIC_DEMO_MODE?: string };
+type DemoEnvironment = {
+  NEXT_PUBLIC_DEMO_MODE?: string;
+  NEXT_PUBLIC_VERCEL_DEMO_MODE?: string;
+};
 
 export function isDemoEnvironment(
   environment: DemoEnvironment = process.env as DemoEnvironment,
@@ -8,11 +11,21 @@ export function isDemoEnvironment(
   return environment.NEXT_PUBLIC_DEMO_MODE === "true";
 }
 
+export function isVercelDemoEnvironment(
+  environment: DemoEnvironment = process.env as DemoEnvironment,
+): boolean {
+  return environment.NEXT_PUBLIC_VERCEL_DEMO_MODE === "true";
+}
+
 export function defaultApiTimeoutMs(environment?: DemoEnvironment): number {
+  if (isVercelDemoEnvironment(environment)) return 250_000;
   return isDemoEnvironment(environment) ? 90_000 : 15_000;
 }
 
 export function timeoutMessage(timeoutMs: number, environment?: DemoEnvironment): string {
+  if (isVercelDemoEnvironment(environment)) {
+    return `The serverless demo did not finish within ${Math.round(timeoutMs / 1000)} seconds. If an outbox job was already enqueued, it remains durable; refresh the investigation to retry.`;
+  }
   if (isDemoEnvironment(environment)) {
     return `The free demo API may still be waking up after ${Math.round(timeoutMs / 1000)} seconds. Wait a moment and retry.`;
   }

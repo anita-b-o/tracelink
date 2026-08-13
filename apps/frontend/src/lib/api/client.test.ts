@@ -46,11 +46,17 @@ describe("API client", () => {
 
   it("uses a longer timeout and explicit cold-start guidance only for demo", () => {
     const demo = { NEXT_PUBLIC_DEMO_MODE: "true" };
+    const vercelDemo = {
+      NEXT_PUBLIC_DEMO_MODE: "true",
+      NEXT_PUBLIC_VERCEL_DEMO_MODE: "true",
+    };
     const normal = { NEXT_PUBLIC_DEMO_MODE: "false" };
 
     expect(isDemoEnvironment(demo)).toBe(true);
     expect(defaultApiTimeoutMs(demo)).toBe(90_000);
     expect(timeoutMessage(90_000, demo)).toContain("free demo API may still be waking up");
+    expect(defaultApiTimeoutMs(vercelDemo)).toBe(250_000);
+    expect(timeoutMessage(250_000, vercelDemo)).toContain("it remains durable");
     expect(isDemoEnvironment(normal)).toBe(false);
     expect(defaultApiTimeoutMs(normal)).toBe(15_000);
     expect(timeoutMessage(15_000, normal)).not.toContain("free demo");

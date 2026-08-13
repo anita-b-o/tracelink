@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from tracelink.core.config import get_settings
 
@@ -46,18 +47,28 @@ def _register_vector(dbapi_connection: Any, _: Any) -> None:
 @lru_cache
 def get_engine() -> AsyncEngine:
     settings = get_settings()
-    engine = create_async_engine(
-        settings.database_url,
-        pool_pre_ping=True,
-        pool_size=settings.db_pool_size,
-        max_overflow=settings.db_max_overflow,
-        pool_timeout=settings.db_pool_timeout_seconds,
-        pool_recycle=settings.db_pool_recycle_seconds,
-        connect_args={
-            "connect_timeout": settings.db_connect_timeout_seconds,
-            "options": f"-c statement_timeout={settings.db_statement_timeout_ms}",
-        },
-    )
+    connect_args = {
+        "connect_timeout": settings.db_connect_timeout_seconds,
+        "options": f"-c statement_timeout={settings.db_statement_timeout_ms}",
+    }
+    if settings.serverless_runtime:
+        # The provider-side pooler owns connection reuse for ephemeral Functions.
+        engine = create_async_engine(
+            settings.database_url,
+            pool_pre_ping=True,
+            poolclass=NullPool,
+            connect_args=connect_args,
+        )
+    else:
+        engine = create_async_engine(
+            settings.database_url,
+            pool_pre_ping=True,
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_max_overflow,
+            pool_timeout=settings.db_pool_timeout_seconds,
+            pool_recycle=settings.db_pool_recycle_seconds,
+            connect_args=connect_args,
+        )
     event.listen(engine.sync_engine, "connect", _register_vector)
     return engine
 

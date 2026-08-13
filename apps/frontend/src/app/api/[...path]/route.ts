@@ -4,6 +4,7 @@ import { backendInternalUrl } from "@/lib/backend-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 const MAX_BODY_BYTES = 262_144;
 const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "cookie", "origin", "user-agent", "x-csrf-token", "x-request-id"];

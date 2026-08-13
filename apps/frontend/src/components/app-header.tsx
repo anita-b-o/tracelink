@@ -11,7 +11,7 @@ export function AppHeader() {
   const pathname = usePathname();
   if (["/login", "/register"].includes(pathname)) return null;
   return <header className="app-bar">
-    <Link href="/" className="brand"><span className="brand-mark"><Network size={18} /></span><span>TraceLink</span></Link>
+    <Link href="/" className="brand"><span className="brand-mark"><Network size={18} /></span><span>TraceLink</span></Link>{process.env.NEXT_PUBLIC_VERCEL_DEMO_MODE === "true" && <span className="session-user" title="Durable background jobs advance while investigation and report views poll the API.">Serverless demo · request-triggered jobs</span>}
     <nav aria-label="Primary navigation"><span className="session-user">{user?.display_name ?? user?.email}</span><Link href="/">Investigations</Link><Link href="/investigations/new" className="button small">New investigation</Link><button className="button secondary small" onClick={() => void logout()}>Log out</button></nav>
   </header>;
 }
