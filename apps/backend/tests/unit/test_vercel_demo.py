@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -81,13 +82,58 @@ async def test_non_demo_serverless_request_does_not_dispatch() -> None:
 
 
 def test_serverless_database_uses_provider_side_pooling(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = Settings(app_env="test", serverless_runtime=True)
+    settings = Settings(
+        app_env="test",
+        serverless_runtime=True,
+        db_connect_timeout_seconds=7,
+        db_statement_timeout_ms=4567,
+    )
+    connect_args: dict[str, Any] = {}
+    create_async_engine = database.create_async_engine
+
+    def capture_connect_args(url: str, **kwargs: Any) -> Any:
+        connect_args.update(kwargs["connect_args"])
+        return create_async_engine(url, **kwargs)
+
     database.get_engine.cache_clear()
     database.get_session_factory.cache_clear()
     monkeypatch.setattr(database, "get_settings", lambda: settings)
+    monkeypatch.setattr(database, "create_async_engine", capture_connect_args)
 
     engine = database.get_engine()
 
     assert isinstance(engine.pool, NullPool)
+    assert connect_args == {"connect_timeout": 7}
+    database.get_engine.cache_clear()
+    database.get_session_factory.cache_clear()
+
+
+def test_non_serverless_database_keeps_statement_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        app_env="test",
+        serverless_runtime=False,
+        db_connect_timeout_seconds=7,
+        db_statement_timeout_ms=4567,
+    )
+    connect_args: dict[str, Any] = {}
+    create_async_engine = database.create_async_engine
+
+    def capture_connect_args(url: str, **kwargs: Any) -> Any:
+        connect_args.update(kwargs["connect_args"])
+        return create_async_engine(url, **kwargs)
+
+    database.get_engine.cache_clear()
+    database.get_session_factory.cache_clear()
+    monkeypatch.setattr(database, "get_settings", lambda: settings)
+    monkeypatch.setattr(database, "create_async_engine", capture_connect_args)
+
+    database.get_engine()
+
+    assert connect_args == {
+        "connect_timeout": 7,
+        "options": "-c statement_timeout=4567",
+    }
     database.get_engine.cache_clear()
     database.get_session_factory.cache_clear()
