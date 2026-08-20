@@ -47,9 +47,8 @@ def _register_vector(dbapi_connection: Any, _: Any) -> None:
 @lru_cache
 def get_engine() -> AsyncEngine:
     settings = get_settings()
-    connect_args = {
+    connect_args: dict[str, Any] = {
         "connect_timeout": settings.db_connect_timeout_seconds,
-        "options": f"-c statement_timeout={settings.db_statement_timeout_ms}",
     }
     if settings.serverless_runtime:
         # The provider-side pooler owns connection reuse for ephemeral Functions.
@@ -60,6 +59,7 @@ def get_engine() -> AsyncEngine:
             connect_args=connect_args,
         )
     else:
+        connect_args["options"] = f"-c statement_timeout={settings.db_statement_timeout_ms}"
         engine = create_async_engine(
             settings.database_url,
             pool_pre_ping=True,
