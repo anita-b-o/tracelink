@@ -34,10 +34,22 @@ test("Vercel Preview supports the persisted investigation journey", async ({
     .getByLabel(/Original query/)
     .fill("Verify the deployed Preview investigation workflow and persisted task state.");
   await page.getByRole("checkbox", { name: /Start automatically/ }).uncheck();
+
+  const createResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/investigations") &&
+      response.request().method() === "POST",
+  );
   await page.getByRole("button", { name: /Create investigation/ }).click();
+  const createResponse = await createResponsePromise;
+  expect(createResponse.status()).toBe(201);
+  const created = (await createResponse.json()) as { id: string; title: string };
+  expect(created.title).toBe(title);
+
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
   await expect(page.getByText("DRAFT", { exact: true })).toBeVisible();
   const workspaceUrl = page.url();
+  expect(workspaceUrl).toContain(`/investigations/${created.id}`);
 
   await page.getByRole("button", { name: "Start" }).click();
   await expect(page.getByText("DRAFT", { exact: true })).toBeHidden({ timeout: 30_000 });
@@ -56,7 +68,21 @@ test("Vercel Preview supports the persisted investigation journey", async ({
   await expect(
     page.getByRole("heading", { name: "Investigations", exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("main").getByText(title, { exact: true })).toBeVisible();
+
+  const investigationsResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/investigations?limit=13&offset=0") &&
+      response.request().method() === "GET" &&
+      response.status() === 200,
+  );
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Investigations", exact: true }),
+  ).toBeVisible();
+  const investigationsResponse = await investigationsResponsePromise;
+  const investigations = (await investigationsResponse.json()) as Array<{ id: string }>;
+  expect(investigations.some((item) => item.id === created.id)).toBe(true);
+  await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
 
   await page.goto(workspaceUrl);
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
