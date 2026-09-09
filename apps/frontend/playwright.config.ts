@@ -19,7 +19,11 @@ export default defineConfig({
         { name: "auth", testMatch: /auth\.spec\.ts/ },
         {
           name: "workspace",
-          testIgnore: [/auth\.setup\.ts/, /auth\.spec\.ts/, /preview-smoke\.spec\.ts/],
+          testIgnore: [
+            /auth\.setup\.ts/,
+            /auth\.spec\.ts/,
+            /preview-smoke\.spec\.ts/,
+          ],
           dependencies: ["auth-setup"],
           use: { storageState: "test-results/.auth/user.json" },
         },
