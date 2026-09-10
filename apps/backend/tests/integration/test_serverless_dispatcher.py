@@ -78,8 +78,9 @@ async def test_serverless_start_delivery_claims_a_research_task(
     investigation = await InvestigationRepository(db_session).create(
         "Serverless", "Investigate ACME"
     )
+    investigation_id = investigation.id
     workflow = InvestigationWorkflowService(db_session, production_serverless_settings(monkeypatch))
-    started = await workflow.start(investigation.id)
+    started = await workflow.start(investigation_id)
     for task_id in started.pending_task_ids:
         await enqueue_task(db_session, "test.research", [str(task_id), None])
     await db_session.commit()
@@ -98,7 +99,7 @@ async def test_serverless_start_delivery_claims_a_research_task(
         == 1
     )
     db_session.expire_all()
-    tasks = await ResearchTaskRepository(db_session).list_by_investigation(investigation.id)
+    tasks = await ResearchTaskRepository(db_session).list_by_investigation(investigation_id)
     assert len(tasks) == 4
     assert sum(task.attempts for task in tasks) == 1
     assert sum(task.status is ResearchTaskStatus.RUNNING for task in tasks) == 1
