@@ -56,10 +56,10 @@ from tracelink.domain.models import (
 from tracelink.infrastructure.database import get_session
 from tracelink.repositories.investigations import InvestigationRepository
 from tracelink.repositories.relationships import RelationshipRepository
+from tracelink.serverless_dispatcher import dispatch_serverless_safely
 from tracelink.services.audit import AuditService
 from tracelink.services.errors import DomainConflictError, DomainNotFoundError
 from tracelink.services.investigation_workflow import InvestigationWorkflowService
-from tracelink.serverless_dispatcher import dispatch_serverless_safely
 from tracelink.services.outbox import enqueue_research_task_once, enqueue_task
 from tracelink.services.research_artifacts import ResearchArtifactService
 from tracelink.services.workspace import investigation_summaries
