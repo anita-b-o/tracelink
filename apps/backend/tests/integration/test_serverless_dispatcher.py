@@ -78,9 +78,7 @@ async def test_serverless_start_delivery_claims_a_research_task(
     investigation = await InvestigationRepository(db_session).create(
         "Serverless", "Investigate ACME"
     )
-    workflow = InvestigationWorkflowService(
-        db_session, production_serverless_settings(monkeypatch)
-    )
+    workflow = InvestigationWorkflowService(db_session, production_serverless_settings(monkeypatch))
     started = await workflow.start(investigation.id)
     for task_id in started.pending_task_ids:
         await enqueue_task(db_session, "test.research", [str(task_id), None])
