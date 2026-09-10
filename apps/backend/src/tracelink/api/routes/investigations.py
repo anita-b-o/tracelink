@@ -189,9 +189,7 @@ async def start_investigation(
     try:
         result = await InvestigationWorkflowService(session, settings).start(investigation_id)
         for research_task_id in result.pending_task_ids:
-            await enqueue_research_task_once(
-                session, research_task_id, settings.fake_research_mode
-            )
+            await enqueue_research_task_once(session, research_task_id, settings.fake_research_mode)
         await session.commit()
         if settings.serverless_runtime:
             await dispatch_serverless_safely(settings)

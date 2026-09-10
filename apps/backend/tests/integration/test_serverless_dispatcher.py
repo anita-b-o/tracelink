@@ -63,9 +63,7 @@ async def test_production_serverless_dispatches_one_event_per_request(
     assert calls == [[0], [1], [2], [3]]
 
     db_session.expire_all()
-    events = list(
-        await db_session.scalars(select(OutboxEvent).order_by(OutboxEvent.created_at))
-    )
+    events = list(await db_session.scalars(select(OutboxEvent).order_by(OutboxEvent.created_at)))
     assert len(events) == 4
     assert all(event.status is OutboxStatus.PUBLISHED for event in events)
     assert all(event.attempts == 1 for event in events)
