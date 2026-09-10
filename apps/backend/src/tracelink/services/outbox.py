@@ -35,12 +35,45 @@ async def enqueue_task(
     return event
 
 
+async def enqueue_research_task_once(
+    session: AsyncSession,
+    research_task_id: UUID,
+    mode: str | None,
+) -> OutboxEvent | None:
+    """Enqueue initial research delivery unless a durable delivery already exists.
+
+    Explicit task retries intentionally use ``enqueue_task`` directly: they create
+    a new delivery after the workflow has moved the task back to ``PENDING``.
+    """
+    existing = await session.scalar(
+        select(OutboxEvent.id).where(
+            OutboxEvent.task_name == "tracelink.execute_research_task",
+            OutboxEvent.payload["args"][0].as_string() == str(research_task_id),
+            OutboxEvent.status.in_(
+                (OutboxStatus.PENDING, OutboxStatus.PUBLISHING, OutboxStatus.PUBLISHED)
+            ),
+        )
+    )
+    if existing is not None:
+        return None
+    return await enqueue_task(
+        session,
+        "tracelink.execute_research_task",
+        [str(research_task_id), mode],
+    )
+
+
 class OutboxDispatcher:
     def __init__(self, session: AsyncSession, settings: Settings) -> None:
         self.session = session
         self.settings = settings
 
-    async def claim(self) -> list[UUID]:
+    async def claim(self, *, limit: int | None = None) -> list[UUID]:
+        batch_size = (
+            min(limit, self.settings.outbox_batch_size)
+            if limit is not None
+            else self.settings.outbox_batch_size
+        )
         now = datetime.now(UTC)
         lease_cutoff = now - timedelta(seconds=self.settings.outbox_lease_seconds)
         events = list(
@@ -59,7 +92,7 @@ class OutboxDispatcher:
                     ),
                 )
                 .order_by(OutboxEvent.created_at, OutboxEvent.id)
-                .limit(self.settings.outbox_batch_size)
+                .limit(batch_size)
                 .with_for_update(skip_locked=True)
             )
         )

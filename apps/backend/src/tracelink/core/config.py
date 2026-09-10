@@ -99,7 +99,8 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("TRACELINK_SERVERLESS", "serverless_runtime"),
     )
-    serverless_dispatch_timeout_seconds: float = Field(default=240.0, ge=30, le=270)
+    # Keep a 60-second margin below Vercel's configured 300-second Function limit.
+    serverless_dispatch_timeout_seconds: float = Field(default=240.0, ge=30, le=240)
     e2e_seed_enabled: bool = False
     test_auth_bypass: bool = False
     research_http_timeout_seconds: float = Field(default=10.0, gt=0, le=120)

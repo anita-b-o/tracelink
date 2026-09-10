@@ -59,7 +59,8 @@ from tracelink.repositories.relationships import RelationshipRepository
 from tracelink.services.audit import AuditService
 from tracelink.services.errors import DomainConflictError, DomainNotFoundError
 from tracelink.services.investigation_workflow import InvestigationWorkflowService
-from tracelink.services.outbox import enqueue_task
+from tracelink.serverless_dispatcher import dispatch_serverless_safely
+from tracelink.services.outbox import enqueue_research_task_once, enqueue_task
 from tracelink.services.research_artifacts import ResearchArtifactService
 from tracelink.services.workspace import investigation_summaries
 
@@ -188,15 +189,12 @@ async def start_investigation(
     try:
         result = await InvestigationWorkflowService(session, settings).start(investigation_id)
         for research_task_id in result.pending_task_ids:
-            await enqueue_task(
-                session,
-                "tracelink.execute_research_task",
-                [
-                    str(research_task_id),
-                    settings.fake_research_mode,
-                ],
+            await enqueue_research_task_once(
+                session, research_task_id, settings.fake_research_mode
             )
         await session.commit()
+        if settings.serverless_runtime:
+            await dispatch_serverless_safely(settings)
         await session.refresh(result.investigation)
         response = InvestigationRead.model_validate(result.investigation)
     except (DomainNotFoundError, DomainConflictError) as exc:

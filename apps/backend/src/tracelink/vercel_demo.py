@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-import logging
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
@@ -11,9 +9,7 @@ from starlette.responses import Response
 from starlette.types import ASGIApp
 
 from tracelink.core.config import Settings
-from tracelink.demo_dispatcher import dispatch_demo_once
-
-logger = logging.getLogger(__name__)
+from tracelink.serverless_dispatcher import dispatch_serverless_safely
 
 DispatchOnce = Callable[[Settings], Awaitable[int]]
 
@@ -42,28 +38,27 @@ def is_dispatch_trigger(method: str, path: str) -> bool:
     return True
 
 
-class RequestTriggeredOutboxMiddleware(BaseHTTPMiddleware):
-    """Advance the durable demo outbox only while a relevant request is alive."""
+class ServerlessDispatchMiddleware(BaseHTTPMiddleware):
+    """Advance one durable outbox event only while a serverless request is alive."""
 
     def __init__(
         self,
         app: ASGIApp,
         *,
         settings: Settings,
-        dispatch_once: DispatchOnce = dispatch_demo_once,
+        dispatch_once: DispatchOnce = dispatch_serverless_safely,
     ) -> None:
         super().__init__(app)
         self.settings = settings
         self.dispatch_once = dispatch_once
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        enabled = self.settings.demo_mode and self.settings.serverless_runtime
-        if enabled and is_dispatch_trigger(request.method, request.url.path):
-            try:
-                async with asyncio.timeout(self.settings.serverless_dispatch_timeout_seconds):
-                    await self.dispatch_once(self.settings)
-            except TimeoutError:
-                logger.warning("serverless demo outbox dispatch timed out")
-            except Exception:
-                logger.exception("serverless demo outbox dispatch failed")
+        if self.settings.serverless_runtime and is_dispatch_trigger(
+            request.method, request.url.path
+        ):
+            await self.dispatch_once(self.settings)
         return await call_next(request)
+
+
+# Compatibility alias for downstream imports while the module is renamed in a later cleanup.
+RequestTriggeredOutboxMiddleware = ServerlessDispatchMiddleware
