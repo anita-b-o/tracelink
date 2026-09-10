@@ -88,9 +88,10 @@ async def test_serverless_start_delivery_claims_a_research_task(
             ).claim(UUID(str(args[0])), str(event.id))
             assert task is not None
 
-    assert await dispatch_serverless_once(
-        production_serverless_settings(), {"test.research": handler}
-    ) == 1
+    assert (
+        await dispatch_serverless_once(production_serverless_settings(), {"test.research": handler})
+        == 1
+    )
     db_session.expire_all()
     tasks = await ResearchTaskRepository(db_session).list_by_investigation(investigation.id)
     assert len(tasks) == 4
