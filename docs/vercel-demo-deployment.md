@@ -1,9 +1,10 @@
-# Demo gratuita en Vercel Hobby
+# Ejecución serverless en Vercel
 
 ## Estado y alcance
 
-Esta adaptación está aislada de Docker/Compose, Celery, el dispatcher productivo, los entornos de
-staging/production y los Blueprints de Render. No reemplaza ninguno de esos caminos.
+En Vercel no se inicia Celery, un worker persistente ni un dispatcher residente. PostgreSQL conserva
+el outbox durable y cada Function ejecuta, como máximo, una unidad de trabajo mientras su request
+sigue activa. Docker/Compose y Render mantienen su dispatcher residente más el worker Celery.
 
 La arquitectura elegida usa dos proyectos Vercel conectados al mismo repositorio:
 
@@ -31,18 +32,19 @@ y [límites Hobby](https://vercel.com/docs/plans/hobby).
 observabilidad y servicios existentes. El adaptador activa `TRACELINK_SERVERLESS=true`; el lifespan
 no inicia el loop de `demo_dispatcher.py` en ese modo.
 
-Las mutaciones continúan escribiendo eventos en el outbox dentro de la transacción PostgreSQL. Los
-GET de polling que la UI ya hace sobre una Investigation, sus tasks o reports ejecutan como máximo
-un `dispatch_demo_once` antes de leer el estado. Se mantienen `FOR UPDATE SKIP LOCKED`, attempts,
-backoff, lease y entrega at-least-once. Cada invocación tiene timeout interno de 240 segundos; si
-Vercel termina una Function, el evento `PUBLISHING` vuelve a ser elegible al vencer el lease de 360
-segundos.
+Las mutaciones continúan escribiendo eventos en el outbox dentro de la transacción PostgreSQL.
+`POST /start` hace commit y luego intenta un `dispatch_serverless_once`; los GET de polling sobre
+una Investigation, sus tasks o reports hacen lo mismo antes de leer el estado. Cada intento reclama
+como máximo un evento. Se mantienen `FOR UPDATE SKIP LOCKED`, attempts, backoff, lease y entrega
+at-least-once. Cada invocación tiene un presupuesto interno máximo de 240 segundos; si Vercel corta
+la Function, el evento `PUBLISHING` vuelve a ser elegible al vencer el lease de 360 segundos.
 
 Consecuencias explícitas:
 
 - sin tráfico no se procesa trabajo; el outbox lo conserva hasta que alguien abra o refresque la
   investigación/reporte;
-- una vista activa avanza normalmente un evento por request de polling;
+- `/start` intenta el primer evento y una vista activa avanza normalmente un evento por request de
+  polling;
 - los trabajos pueden tardar varios polls y los superiores a 240 segundos se reintentan;
 - no hay garantía de latencia ni SLA y no es una arquitectura productiva;
 - no se inicia Celery, un worker, un dispatcher residente ni migrations desde una Function.
@@ -112,8 +114,14 @@ Nunca usar prefijos `NEXT_PUBLIC_` para secretos.
 | `SENTRY_TRACES_SAMPLE_RATE` | `0` si Sentry no se usa |
 
 `TRACELINK_SERVERLESS` no se configura en Dashboard: lo fija el entrypoint Vercel antes de importar
-la aplicación. No configurar `CELERY_BROKER_URL` ni `CELERY_RESULT_BACKEND` para esta demo; no se
-inicia Celery.
+la aplicación. Esta política aplica tanto a `APP_ENV=demo` como a `APP_ENV=production`. No configurar
+`CELERY_BROKER_URL` ni `CELERY_RESULT_BACKEND` para Vercel; no se inicia Celery.
+
+## Diferencia con Docker/Compose y Render
+
+Local y Render conservan el proceso `outbox_dispatcher`, que publica al broker, y un worker Celery
+que consume las tareas. Esos procesos sólo se usan cuando `TRACELINK_SERVERLESS=false`; el middleware
+request-triggered no se activa en esos entornos.
 
 ### `tracelink-demo-web` (Root Directory: `apps/frontend`)
 
