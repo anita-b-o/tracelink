@@ -24,7 +24,9 @@ def test_dispatch_trigger_is_limited_to_serverless_polling_routes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_production_serverless_advances_once_before_poll_response() -> None:
+async def test_production_serverless_advances_once_before_poll_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     inner = FastAPI()
     calls: list[Settings] = []
 
@@ -36,6 +38,7 @@ async def test_production_serverless_advances_once_before_poll_response() -> Non
         calls.append(settings)
         return 1
 
+    monkeypatch.delenv("TEST_AUTH_BYPASS", raising=False)
     settings = Settings(
         app_env="production",
         serverless_runtime=True,

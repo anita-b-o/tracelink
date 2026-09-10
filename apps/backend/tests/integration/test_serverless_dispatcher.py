@@ -22,7 +22,8 @@ from tracelink.services.outbox import OutboxDispatcher, enqueue_task
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
-def production_serverless_settings() -> Settings:
+def production_serverless_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
+    monkeypatch.delenv("TEST_AUTH_BYPASS", raising=False)
     return Settings(
         app_env="production",
         serverless_runtime=True,
@@ -42,6 +43,7 @@ def production_serverless_settings() -> Settings:
 
 async def test_production_serverless_dispatches_one_event_per_request(
     db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for index in range(4):
         await enqueue_task(db_session, "test.serverless", [index])
@@ -53,7 +55,7 @@ async def test_production_serverless_dispatches_one_event_per_request(
         calls.append(args)
 
     handlers: dict[str, ServerlessTaskHandler] = {"test.serverless": handler}
-    settings = production_serverless_settings()
+    settings = production_serverless_settings(monkeypatch)
 
     assert await dispatch_serverless_once(settings, handlers) == 1
     assert calls == [[0]]
@@ -71,11 +73,14 @@ async def test_production_serverless_dispatches_one_event_per_request(
 
 async def test_serverless_start_delivery_claims_a_research_task(
     db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     investigation = await InvestigationRepository(db_session).create(
         "Serverless", "Investigate ACME"
     )
-    workflow = InvestigationWorkflowService(db_session, production_serverless_settings())
+    workflow = InvestigationWorkflowService(
+        db_session, production_serverless_settings(monkeypatch)
+    )
     started = await workflow.start(investigation.id)
     for task_id in started.pending_task_ids:
         await enqueue_task(db_session, "test.research", [str(task_id), None])
@@ -84,12 +89,14 @@ async def test_serverless_start_delivery_claims_a_research_task(
     async def handler(event: OutboxEvent, args: list[Any]) -> None:
         async with get_session_factory()() as session, session.begin():
             task = await InvestigationWorkflowService(
-                session, production_serverless_settings()
+                session, production_serverless_settings(monkeypatch)
             ).claim(UUID(str(args[0])), str(event.id))
             assert task is not None
 
     assert (
-        await dispatch_serverless_once(production_serverless_settings(), {"test.research": handler})
+        await dispatch_serverless_once(
+            production_serverless_settings(monkeypatch), {"test.research": handler}
+        )
         == 1
     )
     db_session.expire_all()
@@ -101,6 +108,7 @@ async def test_serverless_start_delivery_claims_a_research_task(
 
 async def test_concurrent_serverless_polls_do_not_execute_an_event_twice(
     db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for index in range(2):
         await enqueue_task(db_session, "test.serverless", [index])
@@ -113,8 +121,8 @@ async def test_concurrent_serverless_polls_do_not_execute_an_event_twice(
 
     handlers: dict[str, ServerlessTaskHandler] = {"test.serverless": handler}
     await asyncio.gather(
-        dispatch_serverless_once(production_serverless_settings(), handlers),
-        dispatch_serverless_once(production_serverless_settings(), handlers),
+        dispatch_serverless_once(production_serverless_settings(monkeypatch), handlers),
+        dispatch_serverless_once(production_serverless_settings(monkeypatch), handlers),
     )
 
     assert sorted(calls) == [0, 1]
@@ -122,12 +130,13 @@ async def test_concurrent_serverless_polls_do_not_execute_an_event_twice(
 
 async def test_expired_serverless_lease_is_recovered(
     db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     event = await enqueue_task(db_session, "test.serverless", ["recovered"])
     event_id = event.id
     await db_session.commit()
 
-    settings = production_serverless_settings()
+    settings = production_serverless_settings(monkeypatch)
     assert await OutboxDispatcher(db_session, settings).claim(limit=1) == [event_id]
     event.locked_at = datetime.now(UTC) - timedelta(seconds=settings.outbox_lease_seconds + 1)
     await db_session.commit()
