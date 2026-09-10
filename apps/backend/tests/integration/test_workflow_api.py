@@ -6,6 +6,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tracelink.api.routes import investigations as investigation_routes
+from tracelink.core.config import Settings, get_settings
 from tracelink.domain.enums import FakeResearchMode
 from tracelink.domain.models import OutboxEvent
 from tracelink.infrastructure.database import get_session
@@ -15,12 +17,25 @@ from tracelink.main import app
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
-async def test_workflow_api_contracts(db_session: AsyncSession) -> None:
+async def test_workflow_api_contracts(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
     async def session_override() -> AsyncIterator[AsyncSession]:
         yield db_session
 
     app.dependency_overrides[get_session] = session_override
     transport = ASGITransport(app=app)
+    settings = get_settings().model_copy(update={"serverless_runtime": True})
+    drain_calls = 0
+
+    async def dispatch_once(_: Settings) -> int:
+        nonlocal drain_calls
+        drain_calls += 1
+        assert await db_session.scalar(select(func.count()).select_from(OutboxEvent)) == 4
+        return 1
+
+    monkeypatch.setattr(investigation_routes, "get_settings", lambda: settings)
+    monkeypatch.setattr(investigation_routes, "dispatch_serverless_safely", dispatch_once)
     try:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             created = await client.post(
@@ -33,10 +48,11 @@ async def test_workflow_api_contracts(db_session: AsyncSession) -> None:
             assert started.status_code == 202
             assert started.json()["status"] == "PENDING"
             assert await db_session.scalar(select(func.count()).select_from(OutboxEvent)) == 4
+            assert drain_calls == 1
 
             repeated = await client.post(f"/api/investigations/{investigation_id}/start")
             assert repeated.status_code == 202
-            assert await db_session.scalar(select(func.count()).select_from(OutboxEvent)) == 8
+            assert await db_session.scalar(select(func.count()).select_from(OutboxEvent)) == 4
 
             tasks_response = await client.get(f"/api/investigations/{investigation_id}/tasks")
             assert tasks_response.status_code == 200

@@ -8,10 +8,10 @@ from sqlalchemy.pool import NullPool
 
 from tracelink.core.config import Settings
 from tracelink.infrastructure import database
-from tracelink.vercel_demo import RequestTriggeredOutboxMiddleware, is_dispatch_trigger
+from tracelink.vercel_demo import ServerlessDispatchMiddleware, is_dispatch_trigger
 
 
-def test_dispatch_trigger_is_limited_to_demo_polling_routes() -> None:
+def test_dispatch_trigger_is_limited_to_serverless_polling_routes() -> None:
     resource_id = uuid4()
 
     assert is_dispatch_trigger("GET", f"/api/investigations/{resource_id}")
@@ -24,7 +24,7 @@ def test_dispatch_trigger_is_limited_to_demo_polling_routes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_serverless_demo_advances_once_before_poll_response() -> None:
+async def test_production_serverless_advances_once_before_poll_response() -> None:
     inner = FastAPI()
     calls: list[Settings] = []
 
@@ -36,9 +36,20 @@ async def test_serverless_demo_advances_once_before_poll_response() -> None:
         calls.append(settings)
         return 1
 
-    settings = Settings(app_env="test", serverless_runtime=True)
-    settings.demo_mode = True
-    app = RequestTriggeredOutboxMiddleware(
+    settings = Settings(
+        app_env="production",
+        serverless_runtime=True,
+        cors_allowed_origins="https://web.example",
+        allowed_hosts="api.example",
+        auth_jwt_secret="a" * 40,
+        auth_token_pepper="b" * 40,
+        cookie_secure=True,
+        registration_enabled=True,
+        embedding_provider="openai",
+        llm_provider="openai",
+        openai_api_key="placeholder-for-validation",
+    )
+    app = ServerlessDispatchMiddleware(
         inner,
         settings=settings,
         dispatch_once=dispatch_once,
@@ -54,7 +65,7 @@ async def test_serverless_demo_advances_once_before_poll_response() -> None:
 
 
 @pytest.mark.asyncio
-async def test_non_demo_serverless_request_does_not_dispatch() -> None:
+async def test_non_serverless_request_does_not_dispatch() -> None:
     inner = FastAPI()
     calls = 0
 
@@ -67,9 +78,9 @@ async def test_non_demo_serverless_request_does_not_dispatch() -> None:
         calls += 1
         return 1
 
-    app = RequestTriggeredOutboxMiddleware(
+    app = ServerlessDispatchMiddleware(
         inner,
-        settings=Settings(app_env="test", serverless_runtime=True),
+        settings=Settings(app_env="test", serverless_runtime=False),
         dispatch_once=dispatch_once,
     )
     async with AsyncClient(

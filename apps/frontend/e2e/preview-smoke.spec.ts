@@ -59,6 +59,15 @@ test("Vercel Preview supports the persisted investigation journey", async ({
     .click();
   await expect(page.getByRole("heading", { name: "Research tasks", exact: true })).toBeVisible();
   await expect(page.locator("tbody tr").first()).toBeVisible({ timeout: 30_000 });
+  await expect
+    .poll(
+      () =>
+        page.locator("tbody tr").evaluateAll((rows) =>
+          rows.some((row) => Number(row.children[2]?.textContent?.trim() ?? "0") > 0),
+        ),
+      { timeout: 90_000 },
+    )
+    .toBe(true);
 
   await page.getByRole("button", { name: "Log out" }).click();
   await expect(page).toHaveURL(/\/login$/);
