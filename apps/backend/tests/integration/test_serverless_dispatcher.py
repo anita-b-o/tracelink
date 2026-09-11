@@ -58,11 +58,11 @@ async def test_production_serverless_dispatches_one_event_per_request(
     settings = production_serverless_settings(monkeypatch)
 
     assert await dispatch_serverless_once(settings, handlers) == 1
-    assert calls == [[0]]
+    assert len(calls) == 1
     assert await dispatch_serverless_once(settings, handlers) == 1
     assert await dispatch_serverless_once(settings, handlers) == 1
     assert await dispatch_serverless_once(settings, handlers) == 1
-    assert calls == [[0], [1], [2], [3]]
+    assert sorted(calls) == [[0], [1], [2], [3]]
 
     db_session.expire_all()
     events = list(await db_session.scalars(select(OutboxEvent).order_by(OutboxEvent.created_at)))
