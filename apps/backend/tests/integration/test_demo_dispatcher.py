@@ -29,6 +29,8 @@ def demo_settings() -> Settings:
         embedding_provider="openai",
         llm_provider="openai",
         openai_api_key="placeholder-for-validation",
+        web_search_provider="brave",
+        web_search_api_key="placeholder-search-key",
         test_auth_bypass=False,
         outbox_batch_size=1,
         outbox_max_attempts=3,

@@ -48,15 +48,15 @@ async def test_start_creates_one_idempotent_plan(db_session: AsyncSession) -> No
     second = await InvestigationWorkflowService(db_session, get_settings()).start(investigation.id)
     await db_session.commit()
 
-    assert len(tasks) == 4
-    assert len(second.pending_task_ids) == 4
+    assert len(tasks) == 3
+    assert len(second.pending_task_ids) == 3
     assert (
         await db_session.scalar(
             select(func.count())
             .select_from(ResearchTask)
             .where(ResearchTask.investigation_id == investigation.id)
         )
-        == 4
+        == 3
     )
 
 
@@ -74,7 +74,7 @@ async def test_concurrent_start_does_not_duplicate_plan(db_session: AsyncSession
     await asyncio.gather(start_once(), start_once())
     db_session.expire_all()
     tasks = await ResearchTaskRepository(db_session).list_by_investigation(investigation_id)
-    assert len(tasks) == 4
+    assert len(tasks) == 3
 
 
 async def test_all_success_completes_investigation(db_session: AsyncSession) -> None:
@@ -85,7 +85,7 @@ async def test_all_success_completes_investigation(db_session: AsyncSession) -> 
     stored = await refresh_investigation(db_session, investigation.id)
     progress = await InvestigationWorkflowService(db_session, get_settings()).progress(stored.id)
     assert stored.status is InvestigationStatus.COMPLETED
-    assert progress.completed == progress.total == 4
+    assert progress.completed == progress.total == 3
     assert progress.percent == 100
 
 

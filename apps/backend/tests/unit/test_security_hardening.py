@@ -24,6 +24,8 @@ def _production_settings(**overrides: object) -> Settings:
         "embedding_provider": "openai",
         "llm_provider": "openai",
         "openai_api_key": "placeholder-for-validation",
+        "web_search_provider": "brave",
+        "web_search_api_key": "placeholder-search-key",
         "e2e_seed_enabled": False,
         "test_auth_bypass": False,
     }
@@ -44,6 +46,8 @@ def _demo_settings(**overrides: object) -> Settings:
         "embedding_provider": "openai",
         "llm_provider": "openai",
         "openai_api_key": "placeholder-for-validation",
+        "web_search_provider": "brave",
+        "web_search_api_key": "placeholder-search-key",
         "test_auth_bypass": False,
         "outbox_batch_size": 1,
         "outbox_lease_seconds": 360,
@@ -57,6 +61,32 @@ def test_production_configuration_rejects_fake_and_e2e_modes() -> None:
         _production_settings(embedding_provider="fake")
     with pytest.raises(ValidationError, match="E2E/fake research modes are forbidden"):
         _production_settings(e2e_seed_enabled=True)
+    with pytest.raises(ValidationError, match="only allowed in test"):
+        _production_settings(web_search_provider="fake", web_search_api_key=None)
+
+
+def test_deployed_web_search_configuration_is_required_and_secret() -> None:
+    with pytest.raises(ValidationError, match="WEB_SEARCH_PROVIDER must be configured") as error:
+        _production_settings(web_search_provider="disabled", web_search_api_key=None)
+    assert "placeholder-search-key" not in str(error.value)
+
+    with pytest.raises(ValidationError, match="WEB_SEARCH_API_KEY is required"):
+        _production_settings(web_search_api_key=None)
+
+    settings = _production_settings(web_search_api_key="never-log-this-search-secret")
+    assert "never-log-this-search-secret" not in repr(settings)
+
+
+def test_web_search_environment_limits_are_configurable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WEB_SEARCH_MAX_RESULTS", "8")
+    monkeypatch.setenv("WEB_SEARCH_FETCH_LIMIT", "2")
+    monkeypatch.setenv("WEB_SEARCH_TIMEOUT_SECONDS", "4.5")
+    settings = Settings(app_env="test", _env_file=None)
+    assert settings.research_web_search_max_results == 8
+    assert settings.research_web_search_fetch_limit == 2
+    assert settings.web_search_timeout_seconds == 4.5
 
 
 def test_demo_configuration_is_explicit_and_isolated() -> None:

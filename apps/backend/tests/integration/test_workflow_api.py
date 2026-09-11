@@ -31,7 +31,7 @@ async def test_workflow_api_contracts(
     async def dispatch_once(_: Settings) -> int:
         nonlocal drain_calls
         drain_calls += 1
-        assert await db_session.scalar(select(func.count()).select_from(OutboxEvent)) == 4
+        assert await db_session.scalar(select(func.count()).select_from(OutboxEvent)) == 3
         return 1
 
     monkeypatch.setattr(investigation_routes, "get_settings", lambda: settings)
@@ -47,22 +47,22 @@ async def test_workflow_api_contracts(
             started = await client.post(f"/api/investigations/{investigation_id}/start")
             assert started.status_code == 202
             assert started.json()["status"] == "PENDING"
-            assert await db_session.scalar(select(func.count()).select_from(OutboxEvent)) == 4
+            assert await db_session.scalar(select(func.count()).select_from(OutboxEvent)) == 3
             assert drain_calls == 1
 
             repeated = await client.post(f"/api/investigations/{investigation_id}/start")
             assert repeated.status_code == 202
-            assert await db_session.scalar(select(func.count()).select_from(OutboxEvent)) == 4
+            assert await db_session.scalar(select(func.count()).select_from(OutboxEvent)) == 3
 
             tasks_response = await client.get(f"/api/investigations/{investigation_id}/tasks")
             assert tasks_response.status_code == 200
             tasks = tasks_response.json()
-            assert len(tasks) == 4
+            assert len(tasks) == 3
 
             progress = await client.get(f"/api/investigations/{investigation_id}/progress")
             assert progress.json() == {
-                "total": 4,
-                "pending": 4,
+                "total": 3,
+                "pending": 3,
                 "running": 0,
                 "completed": 0,
                 "failed": 0,
@@ -73,7 +73,6 @@ async def test_workflow_api_contracts(
             detail = await client.get(f"/api/research-tasks/{tasks[0]['id']}")
             assert detail.status_code == 200
             assert detail.json()["type"] in {
-                "IDENTIFY_ENTITY",
                 "WEB_SEARCH",
                 "DOMAIN_LOOKUP",
                 "PUBLIC_MENTIONS",

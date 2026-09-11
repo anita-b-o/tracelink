@@ -36,6 +36,8 @@ def production_serverless_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
         embedding_provider="openai",
         llm_provider="openai",
         openai_api_key="placeholder-for-validation",
+        web_search_provider="brave",
+        web_search_api_key="placeholder-search-key",
         outbox_batch_size=100,
         outbox_lease_seconds=60,
     )
@@ -100,7 +102,7 @@ async def test_serverless_start_delivery_claims_a_research_task(
     )
     db_session.expire_all()
     tasks = await ResearchTaskRepository(db_session).list_by_investigation(investigation_id)
-    assert len(tasks) == 4
+    assert len(tasks) == 3
     assert sum(task.attempts for task in tasks) == 1
     assert sum(task.status is ResearchTaskStatus.RUNNING for task in tasks) == 1
 
@@ -152,3 +154,32 @@ async def test_expired_serverless_lease_is_recovered(
     assert recovered.status is OutboxStatus.PUBLISHED
     assert recovered.attempts == 2
     assert calls == ["recovered"]
+
+
+async def test_serverless_pipeline_progresses_one_durable_event_per_poll(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await enqueue_task(db_session, "test.search", ["query"])
+    await db_session.commit()
+    calls: list[str] = []
+
+    async def search_handler(_: OutboxEvent, args: list[Any]) -> None:
+        calls.append(f"search:{args[0]}")
+        async with get_session_factory()() as session, session.begin():
+            await enqueue_task(session, "test.entities", ["document-id"])
+
+    async def entity_handler(_: OutboxEvent, args: list[Any]) -> None:
+        calls.append(f"entities:{args[0]}")
+
+    handlers: dict[str, ServerlessTaskHandler] = {
+        "test.search": search_handler,
+        "test.entities": entity_handler,
+    }
+    settings = production_serverless_settings(monkeypatch)
+
+    assert await dispatch_serverless_once(settings, handlers) == 1
+    assert calls == ["search:query"]
+    assert await dispatch_serverless_once(settings, handlers) == 1
+    assert calls == ["search:query", "entities:document-id"]
+    assert await dispatch_serverless_once(settings, handlers) == 0

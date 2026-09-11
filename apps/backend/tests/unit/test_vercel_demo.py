@@ -51,6 +51,8 @@ async def test_production_serverless_advances_once_before_poll_response(
         embedding_provider="openai",
         llm_provider="openai",
         openai_api_key="placeholder-for-validation",
+        web_search_provider="brave",
+        web_search_api_key="placeholder-search-key",
     )
     app = ServerlessDispatchMiddleware(
         inner,

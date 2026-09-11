@@ -1,5 +1,11 @@
 from tracelink.connectors.models import ConnectorContext, ConnectorOutput
-from tracelink.connectors.registry import ConnectorRegistry
+from tracelink.connectors.providers import (
+    BraveWebSearchProvider,
+    DisabledWebSearchProvider,
+    FakeWebSearchProvider,
+)
+from tracelink.connectors.registry import ConnectorRegistry, build_web_search_provider
+from tracelink.core.config import Settings
 from tracelink.domain.enums import ResearchTaskType
 
 
@@ -33,3 +39,23 @@ def test_registry_rejects_duplicate_name_and_task_mapping() -> None:
         assert "already registered" in str(exc)
     else:
         raise AssertionError("duplicate connector was accepted")
+
+
+def test_web_search_provider_selection_is_explicit_in_tests() -> None:
+    assert isinstance(
+        build_web_search_provider(Settings(app_env="test")), DisabledWebSearchProvider
+    )
+    assert isinstance(
+        build_web_search_provider(Settings(app_env="test", web_search_provider="fake")),
+        FakeWebSearchProvider,
+    )
+    assert isinstance(
+        build_web_search_provider(
+            Settings(
+                app_env="test",
+                web_search_provider="brave",
+                web_search_api_key="test-key",
+            )
+        ),
+        BraveWebSearchProvider,
+    )
