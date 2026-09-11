@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-import json
-from datetime import UTC, datetime
-from urllib.parse import urlsplit
 
-from tracelink.connectors.cache import ConnectorCache, build_cache_key
+from tracelink.connectors.cache import ConnectorCache
 from tracelink.connectors.errors import (
     ConnectorError,
     ConnectorFetchError,
@@ -86,44 +83,20 @@ class GenericWebSearchConnector:
 
         provider_query = self._provider_query(query, context.task_type)
         limit = self.settings.research_web_search_max_results
-        key = build_cache_key(
+        # Search results are discovery input only. Do not read or write ConnectorCache
+        # here: caching the provider response would retain SERP content.
+        await self.rate_limiter.acquire(
             self.name,
-            {"provider": self.provider.name, "query": provider_query, "limit": limit},
+            self.provider.name,
+            self.requests_per_second or self.settings.research_connector_requests_per_second,
         )
-        cache_hit = False
-        cached = await self.cache.get(key)
-        if cached is not None:
-            try:
-                results = [
-                    ConnectorSearchResult.model_validate(item) for item in json.loads(cached)
-                ]
-            except (TypeError, ValueError):
-                cached = None
-            else:
-                cache_hit = True
-        if cached is None:
-            await self.rate_limiter.acquire(
-                self.name,
-                self.provider.name,
-                self.requests_per_second or self.settings.research_connector_requests_per_second,
-            )
-            results = await self.search(provider_query, limit)
-            await self.cache.set(
-                key,
-                json.dumps(
-                    [item.model_dump(mode="json") for item in results],
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-            )
+        results = await self.search(provider_query, limit)
 
-        artifacts: list[SourceArtifact] = []
+        candidate_urls: list[str] = []
         seen: set[str] = set()
         invalid_count = 0
         duplicate_count = 0
-        searched_at = datetime.now(UTC)
-        for rank, item in enumerate(results[:limit], start=1):
+        for item in results[:limit]:
             try:
                 normalized = normalize_url(item.url)
             except ConnectorError:
@@ -133,48 +106,20 @@ class GenericWebSearchConnector:
                 duplicate_count += 1
                 continue
             seen.add(normalized)
-            provenance = {
-                "connector": self.name,
-                "provider": self.provider.name,
-                "query": provider_query,
-                "rank": item.rank or rank,
-                "searched_at": searched_at.isoformat(),
-                "task_type": context.task_type.value if context.task_type else None,
-            }
-            artifacts.append(
-                SourceArtifact(
-                    source_type="web_page",
-                    url=normalize_url(item.url),
-                    normalized_url=normalized,
-                    publisher=urlsplit(normalized).hostname,
-                    title=item.title[:500] if item.title else None,
-                    published_at=item.published_at,
-                    retrieved_at=searched_at,
-                    metadata={
-                        "connector_name": self.name,
-                        "provider": self.provider.name,
-                        "query": provider_query,
-                        "external_id": item.external_id[:500] if item.external_id else None,
-                        "snippet": item.snippet[:2000] if item.snippet else None,
-                        "rank": item.rank or rank,
-                        "searched_at": searched_at.isoformat(),
-                        "provider_metadata": item.metadata,
-                        "search_provenance": [provenance],
-                    },
-                )
-            )
+            candidate_urls.append(normalized)
 
         documents: list[DocumentArtifact] = []
+        artifacts: list[SourceArtifact] = []
         fetched_count = 0
         fetch_selected_count = 0
         failure_counts: dict[str, int] = {}
         fatal_fetch_error: ConnectorError | None = None
         if self.html_connector is not None:
-            for source in artifacts:
+            for candidate_url in candidate_urls:
                 if fetch_selected_count >= self.settings.research_web_search_fetch_limit:
                     break
                 try:
-                    await self.validator.validate(source.normalized_url)
+                    await self.validator.validate(candidate_url)
                 except ConnectorError as exc:
                     failure_counts[exc.code] = failure_counts.get(exc.code, 0) + 1
                     if not self._controlled_fetch_skip(exc):
@@ -182,7 +127,7 @@ class GenericWebSearchConnector:
                     continue
                 fetch_selected_count += 1
                 try:
-                    fetched = await self.html_connector.execute(source.normalized_url, context)
+                    fetched = await self.html_connector.execute(candidate_url, context)
                 except ConnectorError as exc:
                     failure_counts[exc.code] = failure_counts.get(exc.code, 0) + 1
                     if not self._controlled_fetch_skip(exc):
@@ -193,24 +138,16 @@ class GenericWebSearchConnector:
                         failure_counts.get("EMPTY_FETCH_OUTPUT", 0) + 1
                     )
                     continue
-                fetched_count += 1
                 fetched_source = fetched.sources[0] if fetched.sources else None
-                if fetched_source is not None:
-                    source.publisher = source.publisher or fetched_source.publisher
-                    source.title = source.title or fetched_source.title
-                    source.published_at = source.published_at or fetched_source.published_at
-                    source.retrieved_at = max(source.retrieved_at, fetched_source.retrieved_at)
-                    source.metadata = {
-                        **source.metadata,
-                        "fetch": fetched_source.metadata,
-                    }
+                if fetched_source is None:
+                    failure_counts["EMPTY_FETCH_OUTPUT"] = (
+                        failure_counts.get("EMPTY_FETCH_OUTPUT", 0) + 1
+                    )
+                    continue
+                artifacts.append(fetched_source)
+                fetched_count += 1
                 for document in fetched.documents:
-                    document.source_normalized_url = source.normalized_url
-                    document.metadata = {
-                        **document.metadata,
-                        "search_result_url": source.normalized_url,
-                        "search_provider": self.provider.name,
-                    }
+                    document.source_normalized_url = fetched_source.normalized_url
                     documents.append(document)
         return ConnectorOutput(
             connector=self.name,
@@ -221,8 +158,8 @@ class GenericWebSearchConnector:
             metadata={
                 "provider": self.provider.name,
                 "query_hash": query_hash,
-                "cache_hit": cache_hit,
                 "search_result_count": len(results),
+                "discovered_count": len(candidate_urls),
                 "source_count": len(artifacts),
                 "fetch_selected_count": fetch_selected_count,
                 "fetched_count": fetched_count,
@@ -230,6 +167,7 @@ class GenericWebSearchConnector:
                 "entity_count": None,
                 "entity_count_status": "downstream" if documents else "not_applicable",
                 "skipped_count": invalid_count + sum(failure_counts.values()),
+                "fetch_skipped_count": max(0, len(results) - fetched_count),
                 "failure_reasons": failure_counts,
                 **(
                     {

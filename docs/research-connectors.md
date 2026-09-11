@@ -21,9 +21,11 @@ se agregan fixtures sin Internet; el worker no requiere nuevas ramas.
   description, language, fecha ISO y hasta 100 links.
 - `rdap`: consulta el bootstrap DNS de IANA y el servicio autoritativo. Guarda el JSON canónico
   completo como Document.
-- `web_search`: usa `WebSearchProvider`; la integración productiva inicial es Brave Search. Limita
-  y deduplica resultados, persiste Sources y descarga secuencialmente hasta
-  `WEB_SEARCH_FETCH_LIMIT` páginas con `public_html`. `fake` requiere selección explícita y sólo se
+- `web_search`: usa `WebSearchProvider`; la integración productiva inicial es Brave Search. Brave
+  se usa únicamente para descubrir URLs transitoriamente en memoria: limita y deduplica resultados,
+  valida SSRF y descarga secuencialmente hasta `WEB_SEARCH_FETCH_LIMIT` páginas con `public_html`.
+  Sólo un fetch exitoso produce Source y Document; el título, descripción, URL final, canonical,
+  content type y metadata HTTP provienen de la página original. `fake` requiere selección explícita y sólo se
   admite con `APP_ENV=test`; un provider ausente o un fallo externo hace fallar la task con código
   observable. El adapter usa el endpoint, header `X-Subscription-Token` y máximo de 20 resultados
   documentados en la [referencia oficial de Brave](https://api-dashboard.search.brave.com/api-reference/web/search/get).
@@ -54,19 +56,22 @@ una fuente específica en producción deben revisarse sus términos y robots.
 
 ## Cache, rate limiting y deduplicación
 
-Redis conserva sólo respuestas exitosas durante `RESEARCH_CACHE_TTL_SECONDS`. La key contiene una
+Redis conserva sólo respuestas exitosas de connectors que lo habilitan durante `RESEARCH_CACHE_TTL_SECONDS`. La key contiene una
 versión, connector y SHA-256 del input/configuración; consultas y URLs no aparecen en claro. Un hit
 evita tráfico. Un error de cache degrada a miss; un error del rate limiter bloquea el request.
 
 El rate limiter usa Lua atómico y ventanas de un segundo por connector y host/provider. Si no hay
 capacidad espera al próximo bucket. Redirects y retries consumen cuota.
 
-`Source.normalized_url` y `url_hash` forman la identidad. La metadata `search_provenance` conserva
-provider, query, rank, timestamp y task type de cada hallazgo aun cuando `WEB_SEARCH` y
-`PUBLIC_MENTIONS` encuentran la misma URL. Un advisory lock PostgreSQL serializa
-`get_or_create` sin borrar Sources legacy. Una Source puede tener versiones de Document; el
-contenido se deduplica por `(source_id, content_hash)`. URLs distintas conservan Documents
-separados para no perder procedencia.
+`GenericWebSearchConnector` no habilita cache para Brave: no se guarda el payload ni una
+representación de sus resultados. `Source.normalized_url` y `url_hash` forman la identidad, por lo
+que `WEB_SEARCH` y `PUBLIC_MENTIONS` reutilizan la misma Source cuando encuentran la misma URL.
+Un advisory lock PostgreSQL serializa `get_or_create` sin borrar Sources legacy. Una Source puede
+tener versiones de Document; el contenido se deduplica por `(source_id, content_hash)`, y el
+outbox de entity extraction es idempotente por Document.
+
+Brave Search API is used for transient URL discovery. Persisted evidence is derived from fetched
+source pages, not from Brave Search result content.
 
 Sólo se guardan status, final URL, longitud, ETag, Last-Modified y metadata normalizada. Cookies,
 Authorization, headers completos y bodies nunca llegan a logs o resultados de task.

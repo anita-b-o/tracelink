@@ -46,7 +46,10 @@ class PublicHtmlConnector:
         source_metadata: dict[str, Any] = {
             "status_code": fetch.status_code,
             "final_url": normalized,
+            "content_type": fetch.content_type,
             "content_length": fetch.metadata.get("content_length"),
+            "canonical_url": extracted.canonical_url,
+            "description": extracted.description,
             "connector_name": self.name,
         }
         for key in ("etag", "last_modified"):

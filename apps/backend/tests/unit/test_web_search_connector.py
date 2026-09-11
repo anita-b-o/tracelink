@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -8,7 +9,13 @@ from tracelink.connectors.errors import (
     UnsupportedContentTypeError,
     WebSearchConfigurationError,
 )
-from tracelink.connectors.models import ConnectorContext, ConnectorOutput, ConnectorSearchResult
+from tracelink.connectors.models import (
+    ConnectorContext,
+    ConnectorOutput,
+    ConnectorSearchResult,
+    DocumentArtifact,
+    SourceArtifact,
+)
 from tracelink.connectors.providers import DisabledWebSearchProvider, FakeWebSearchProvider
 from tracelink.connectors.url_safety import UrlSafetyValidator
 from tracelink.connectors.web_search import GenericWebSearchConnector
@@ -17,13 +24,20 @@ from tracelink.domain.enums import ResearchTaskType
 
 
 class MemoryCache:
+    instances: list["MemoryCache"] = []
+
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
+        self.get_calls = 0
+        self.set_calls = 0
+        self.instances.append(self)
 
     async def get(self, key: str) -> str | None:
+        self.get_calls += 1
         return self.values.get(key)
 
     async def set(self, key: str, value: str) -> None:
+        self.set_calls += 1
         self.values[key] = value
 
 
@@ -47,6 +61,33 @@ class RecordingHtmlConnector:
         if self.error is not None:
             raise self.error
         return ConnectorOutput(connector="public_html")
+
+
+class SuccessfulHtmlConnector(RecordingHtmlConnector):
+    async def execute(self, value: str, context: ConnectorContext) -> ConnectorOutput:
+        self.calls.append(value)
+        return ConnectorOutput(
+            connector="public_html",
+            sources=[
+                SourceArtifact(
+                    source_type="web_page",
+                    url=value,
+                    normalized_url=value,
+                    title="HTML title",
+                    retrieved_at=datetime.now(UTC),
+                    metadata={"final_url": value, "status_code": 200},
+                )
+            ],
+            documents=[
+                DocumentArtifact(
+                    source_normalized_url=value,
+                    mime_type="text/html",
+                    raw_text="HTML body",
+                    metadata={"description": "HTML description"},
+                )
+            ],
+            result_count=1,
+        )
 
 
 async def public_resolver(host: str, port: int) -> tuple[str, ...]:
@@ -80,21 +121,60 @@ async def test_disabled_provider_fails_explicitly() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fake_provider_deduplicates_results_and_cache() -> None:
+async def test_search_deduplicates_urls_without_caching_serp() -> None:
+    serp_primary_title = "SERP_TITLE_PRIMARY_SHOULD_NOT_PERSIST"
+    serp_duplicate_title = "SERP_TITLE_DUPLICATE_SHOULD_NOT_PERSIST"
+    serp_primary_snippet = "SERP_SNIPPET_PRIMARY_SHOULD_NOT_PERSIST"
+    serp_duplicate_snippet = "SERP_SNIPPET_DUPLICATE_SHOULD_NOT_PERSIST"
+    serp_primary_external_id = "SERP_EXTERNAL_ID_PRIMARY_SHOULD_NOT_PERSIST"
+    serp_duplicate_external_id = "SERP_EXTERNAL_ID_DUPLICATE_SHOULD_NOT_PERSIST"
+    serp_primary_rank = 987654321
+    serp_duplicate_rank = 987654322
     provider = FakeWebSearchProvider(
         [
-            ConnectorSearchResult(url="https://EXAMPLE.com/a#one", title="A", rank=1),
-            ConnectorSearchResult(url="https://example.com/a", title="duplicate", rank=2),
+            ConnectorSearchResult(
+                url="https://EXAMPLE.com/a#one",
+                title=serp_primary_title,
+                snippet=serp_primary_snippet,
+                external_id=serp_primary_external_id,
+                rank=serp_primary_rank,
+            ),
+            ConnectorSearchResult(
+                url="https://example.com/a",
+                title=serp_duplicate_title,
+                snippet=serp_duplicate_snippet,
+                external_id=serp_duplicate_external_id,
+                rank=serp_duplicate_rank,
+            ),
         ]
     )
     search, limiter = connector(provider)
+    html = SuccessfulHtmlConnector()
+    search.html_connector = html  # type: ignore[assignment]
     context = ConnectorContext(investigation_id=uuid4(), task_type=ResearchTaskType.PUBLIC_MENTIONS)
     first = await search.execute("Acme Corp", context)
     second = await search.execute("Acme Corp", context)
     assert first.result_count == 1
-    assert first.sources[0].normalized_url == "https://example.com/a"
-    assert second.metadata["cache_hit"] is True
-    assert limiter.calls == 1
+    assert first.metadata["duplicate_result_count"] == 1
+    assert first.sources[0].title == "HTML title"
+    assert first.sources[0].metadata == {"final_url": "https://example.com/a", "status_code": 200}
+    assert first.documents[0].metadata["description"] == "HTML description"
+    persisted = str(first.model_dump())
+    for serp_value in (
+        serp_primary_title,
+        serp_duplicate_title,
+        serp_primary_snippet,
+        serp_duplicate_snippet,
+        serp_primary_external_id,
+        serp_duplicate_external_id,
+        str(serp_primary_rank),
+        str(serp_duplicate_rank),
+    ):
+        assert serp_value not in persisted
+    assert second.result_count == 1
+    assert limiter.calls == 2
+    assert MemoryCache.instances[-1].get_calls == 0
+    assert MemoryCache.instances[-1].set_calls == 0
 
 
 @pytest.mark.asyncio
@@ -110,7 +190,7 @@ async def test_private_search_result_is_persistable_but_never_fetched() -> None:
         "Acme", ConnectorContext(investigation_id=uuid4(), task_type=ResearchTaskType.WEB_SEARCH)
     )
 
-    assert len(output.sources) == 1
+    assert output.sources == []
     assert output.documents == []
     assert html.calls == []
     assert output.metadata["failure_reasons"] == {"UNSAFE_URL": 1}
@@ -130,7 +210,7 @@ async def test_unsupported_fetch_is_reported_without_hiding_search_success() -> 
     )
 
     assert output.status == "success"
-    assert output.result_count == 1
+    assert output.result_count == 0
     assert output.metadata["document_count"] == 0
     assert output.metadata["failure_reasons"] == {"UNSUPPORTED_CONTENT_TYPE": 1}
 
@@ -149,5 +229,5 @@ async def test_fetch_network_failure_is_not_converted_to_completed() -> None:
     )
 
     assert output.status == "failed"
-    assert len(output.sources) == 1
+    assert output.sources == []
     assert output.metadata["error_code"] == "CONNECTOR_TIMEOUT"

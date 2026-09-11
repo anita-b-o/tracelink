@@ -75,7 +75,7 @@ clave, configurarla manualmente en Environment del servicio `tracelink-demo-api`
 | Search y Ask | Funcional con documentos indexados y OpenAI disponible |
 | Reports | Funcional de forma serial con evidencia suficiente y OpenAI disponible |
 | `DOMAIN_LOOKUP` | Usa el conector RDAP real existente cuando la query es un dominio válido |
-| `WEB_SEARCH` / `PUBLIC_MENTIONS` | Brave Search → Sources → fetch HTML acotado → Documents |
+| `WEB_SEARCH` / `PUBLIC_MENTIONS` | Brave Search (discovery transitorio) → fetch HTML acotado → Sources/ Documents |
 | `IDENTIFY_ENTITY` | No se planifica; entity extraction se encola por Document |
 
 No se habilitan providers fake. El provider web se fija en `brave`; los providers de embeddings y

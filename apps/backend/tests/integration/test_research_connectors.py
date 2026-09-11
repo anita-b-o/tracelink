@@ -373,6 +373,13 @@ async def test_controlled_search_fetch_persist_and_entity_pipeline(
     assert output.metadata["document_count"] == 1
     assert output.metadata["entity_count"] is None
     assert output.metadata["entity_count_status"] == "downstream"
+    assert output.sources[0].title == "Recruiter"
+    assert output.sources[0].metadata["status_code"] == 200
+    assert output.sources[0].metadata["content_type"] == "text/html"
+    assert output.sources[0].metadata["description"] is None
+    assert "Public recruiting profile" not in str(output.sources[0].model_dump())
+    assert "search_provenance" not in output.sources[0].metadata
+    assert output.documents[0].metadata["description"] is None
     assert len(result.source_ids) == len(result.document_ids) == 1
     assert mentions
     assert await db_session.scalar(select(func.count()).select_from(EntityMention)) >= 1
@@ -449,4 +456,4 @@ async def test_web_and_public_mentions_deduplicate_artifacts_and_entity_delivery
     assert await db_session.scalar(select(func.count()).select_from(OutboxEvent)) == 1
     source = await db_session.get(Source, first.source_ids[0])
     assert source is not None
-    assert len(source.metadata_["search_provenance"]) == 2
+    assert "search_provenance" not in source.metadata_
