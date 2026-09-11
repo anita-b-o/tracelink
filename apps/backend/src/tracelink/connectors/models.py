@@ -63,7 +63,7 @@ class DocumentArtifact(BaseModel):
 
 class ConnectorOutput(BaseModel):
     connector: str
-    status: Literal["success", "skipped"] = "success"
+    status: Literal["success", "skipped", "failed"] = "success"
     sources: list[SourceArtifact] = Field(default_factory=list)
     documents: list[DocumentArtifact] = Field(default_factory=list)
     result_count: int = Field(default=0, ge=0)

@@ -9,6 +9,7 @@ from sqlalchemy.exc import OperationalError
 from tracelink.connectors.errors import ConnectorError
 from tracelink.connectors.models import ConnectorOutput, ResearchTaskResult
 from tracelink.connectors.registry import ConnectorRegistry, get_connector_registry
+from tracelink.connectors.web_search import GenericWebSearchConnector
 from tracelink.core.config import get_settings
 from tracelink.domain.enums import FakeResearchMode
 from tracelink.infrastructure.database import get_session_factory
@@ -21,7 +22,7 @@ from tracelink.services.fake_research import (
     FakeResearchExecutor,
 )
 from tracelink.services.investigation_workflow import InvestigationWorkflowService
-from tracelink.services.outbox import enqueue_task
+from tracelink.services.outbox import enqueue_document_entities_once
 from tracelink.services.ownership import require_owned_investigation
 from tracelink.services.research_execution import ConnectorResearchExecutor
 
@@ -67,10 +68,13 @@ async def execute_research_task_async(
 
     output = None
     connector_name = "fake_research"
+    provider_name: str | None = None
     if mode is None:
         configured_registry = registry or get_connector_registry()
         connectors = configured_registry.connectors_for_task_type(task.type)
         connector_name = connectors[0].name if connectors else "fake_research"
+        if connectors and isinstance(connectors[0], GenericWebSearchConnector):
+            provider_name = connectors[0].provider.name
     try:
         if mode is not None:
             fake_result = await FakeResearchExecutor(settings.fake_research_delay_ms).execute(
@@ -121,6 +125,7 @@ async def execute_research_task_async(
                     status="failed",
                     metadata={
                         "error_code": exc.code,
+                        **({"provider": provider_name} if provider_name else {}),
                         **({"status_code": exc.status_code} if exc.status_code else {}),
                     },
                 ),
@@ -131,6 +136,7 @@ async def execute_research_task_async(
                 **context,
                 "status": "FAILED",
                 "connector": connector_name,
+                "provider": provider_name,
                 "status_code": exc.status_code,
             },
         )
@@ -152,24 +158,43 @@ async def execute_research_task_async(
             )
     else:
         persisted_result: ResearchTaskResult | None = None
+        final_status = "COMPLETED"
         async with session_factory() as session, session.begin():
             workflow = InvestigationWorkflowService(session, settings)
             if output is not None:
-                persisted_result = await workflow.complete_with_output(
-                    research_task_id, celery_task_id, output
-                )
+                if output.status == "failed":
+                    error_code = str(output.metadata.get("error_code", "CONNECTOR_FETCH_FAILED"))
+                    error_message = str(
+                        output.metadata.get(
+                            "error_message", "the public source could not be fetched"
+                        )
+                    )
+                    CONNECTOR_FAILURES.labels(connector_name, error_code).inc()
+                    persisted_result = await workflow.fail_with_output(
+                        research_task_id,
+                        celery_task_id,
+                        output,
+                        error_code=error_code,
+                        error_message=error_message,
+                    )
+                    final_status = "FAILED"
+                else:
+                    persisted_result = await workflow.complete_with_output(
+                        research_task_id, celery_task_id, output
+                    )
                 assert persisted_result is not None
                 for document_id in persisted_result.document_ids:
-                    await enqueue_task(
+                    await enqueue_document_entities_once(
                         session,
-                        "tracelink.process_document_entities",
-                        [str(task.investigation_id), str(document_id)],
+                        task.investigation_id,
+                        document_id,
                         queue=downstream_queue,
                     )
             else:
                 assert result is not None
                 await workflow.complete(research_task_id, celery_task_id, result)
-        logger.info("research task completed", extra={**context, "status": "COMPLETED"})
+        log = logger.warning if final_status == "FAILED" else logger.info
+        log("research task finished", extra={**context, "status": final_status})
 
 
 @celery_app.task(  # type: ignore[untyped-decorator]

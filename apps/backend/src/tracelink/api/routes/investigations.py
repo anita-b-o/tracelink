@@ -60,7 +60,7 @@ from tracelink.serverless_dispatcher import dispatch_serverless_safely
 from tracelink.services.audit import AuditService
 from tracelink.services.errors import DomainConflictError, DomainNotFoundError
 from tracelink.services.investigation_workflow import InvestigationWorkflowService
-from tracelink.services.outbox import enqueue_research_task_once, enqueue_task
+from tracelink.services.outbox import enqueue_document_entities_once, enqueue_research_task_once
 from tracelink.services.research_artifacts import ResearchArtifactService
 from tracelink.services.workspace import investigation_summaries
 
@@ -159,10 +159,10 @@ async def ingest_investigation_url(
     await AuthorizationService(session, current_user.id).investigation(investigation_id)
     result = await ResearchArtifactService(session).persist(investigation_id, output)
     for document_id in result.document_ids:
-        await enqueue_task(
+        await enqueue_document_entities_once(
             session,
-            "tracelink.process_document_entities",
-            [str(investigation_id), str(document_id)],
+            investigation_id,
+            document_id,
         )
     await session.commit()
     return result

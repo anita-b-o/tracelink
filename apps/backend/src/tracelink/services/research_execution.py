@@ -26,9 +26,9 @@ class ConnectorResearchExecutor:
             raise FakeResearchCancelled
         if task.type is ResearchTaskType.IDENTIFY_ENTITY:
             return ConnectorOutput(
-                connector="fake_research",
+                connector="document_entity_pipeline",
                 status="skipped",
-                metadata={"reason": "deferred_to_phase_4"},
+                metadata={"reason": "entity_extraction_is_document_driven"},
             )
         connectors = self.registry.connectors_for_task_type(task.type)
         if not connectors:

@@ -6,7 +6,12 @@ from functools import lru_cache
 from tracelink.connectors.cache import ConnectorCache
 from tracelink.connectors.http import get_research_http_client
 from tracelink.connectors.protocols import ResearchConnector
-from tracelink.connectors.providers import DisabledWebSearchProvider, FakeWebSearchProvider
+from tracelink.connectors.providers import (
+    BraveWebSearchProvider,
+    DisabledWebSearchProvider,
+    FakeWebSearchProvider,
+    WebSearchProvider,
+)
 from tracelink.connectors.public_html import PublicHtmlConnector
 from tracelink.connectors.rate_limit import ConnectorRateLimiter
 from tracelink.connectors.rdap import RDAPConnector
@@ -51,14 +56,24 @@ class ConnectorRegistry:
         return (connector,) if connector is not None else ()
 
 
+def build_web_search_provider(settings: Settings) -> WebSearchProvider:
+    if settings.web_search_provider == "fake":
+        return FakeWebSearchProvider()
+    if settings.web_search_provider == "brave":
+        assert settings.web_search_api_key is not None
+        return BraveWebSearchProvider(
+            settings.web_search_api_key,
+            settings.web_search_timeout_seconds,
+        )
+    return DisabledWebSearchProvider()
+
+
 def build_connector_registry(settings: Settings | None = None) -> ConnectorRegistry:
     configured = settings or get_settings()
     redis = get_redis_client()
     http = get_research_http_client()
     html = PublicHtmlConnector(http)
-    provider = (
-        FakeWebSearchProvider() if configured.environment == "test" else DisabledWebSearchProvider()
-    )
+    provider = build_web_search_provider(configured)
     registry = ConnectorRegistry()
     for connector in (
         html,
@@ -69,9 +84,12 @@ def build_connector_registry(settings: Settings | None = None) -> ConnectorRegis
             configured,
             ConnectorCache(redis, configured.research_cache_ttl_seconds),
             ConnectorRateLimiter(redis),
-            UrlSafetyValidator(resolver=_test_public_resolver)
-            if configured.environment == "test"
-            else None,
+            validator=(
+                UrlSafetyValidator(resolver=_test_public_resolver)
+                if configured.environment == "test"
+                else None
+            ),
+            html_connector=html,
         ),
     ):
         registry.register(connector)

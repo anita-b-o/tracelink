@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -19,6 +20,24 @@ def _advisory_lock_key(url_hash: str) -> int:
     return value - 2**64 if value >= 2**63 else value
 
 
+def _merge_source_metadata(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    merged = {**existing, **incoming}
+    provenance: list[object] = []
+    seen: set[str] = set()
+    for metadata in (existing, incoming):
+        entries = metadata.get("search_provenance", [])
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            marker = repr(entry)
+            if marker not in seen:
+                seen.add(marker)
+                provenance.append(entry)
+    if provenance:
+        merged["search_provenance"] = provenance
+    return merged
+
+
 class ResearchArtifactService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -36,7 +55,7 @@ class ResearchArtifactService:
             source.title = source.title or artifact.title
             source.published_at = source.published_at or artifact.published_at
             source.retrieved_at = max(source.retrieved_at, artifact.retrieved_at)
-            source.metadata_ = {**source.metadata_, **artifact.metadata}
+            source.metadata_ = _merge_source_metadata(source.metadata_, artifact.metadata)
             await self.session.flush()
             return source
         return await self.sources.create(

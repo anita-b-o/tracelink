@@ -109,7 +109,21 @@ class Settings(BaseSettings):
     research_http_user_agent: str = Field(
         default="TraceLink/0.1 ResearchConnector", min_length=1, max_length=300
     )
-    research_web_search_max_results: int = Field(default=10, ge=1, le=100)
+    web_search_provider: Literal["disabled", "fake", "brave"] = "disabled"
+    web_search_api_key: SecretStr | None = None
+    web_search_timeout_seconds: float = Field(default=8.0, gt=0, le=60)
+    research_web_search_max_results: int = Field(
+        default=10,
+        ge=1,
+        le=20,
+        validation_alias=AliasChoices("WEB_SEARCH_MAX_RESULTS", "RESEARCH_WEB_SEARCH_MAX_RESULTS"),
+    )
+    research_web_search_fetch_limit: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        validation_alias=AliasChoices("WEB_SEARCH_FETCH_LIMIT", "RESEARCH_WEB_SEARCH_FETCH_LIMIT"),
+    )
     research_cache_ttl_seconds: int = Field(default=3600, ge=1, le=604_800)
     research_connector_requests_per_second: int = Field(default=2, ge=1, le=100)
 
@@ -167,6 +181,15 @@ class Settings(BaseSettings):
             raise ValueError("RAG semantic and lexical weights must sum to 1")
         if self.celery_task_soft_time_limit_seconds >= self.celery_task_time_limit_seconds:
             raise ValueError("Celery soft time limit must be lower than hard time limit")
+        if self.research_web_search_fetch_limit > self.research_web_search_max_results:
+            raise ValueError("WEB_SEARCH_FETCH_LIMIT cannot exceed WEB_SEARCH_MAX_RESULTS")
+        if self.web_search_provider == "fake" and self.app_env != "test":
+            raise ValueError("FakeWebSearchProvider is only allowed in test")
+        if self.web_search_provider == "brave" and (
+            self.web_search_api_key is None
+            or not self.web_search_api_key.get_secret_value().strip()
+        ):
+            raise ValueError("WEB_SEARCH_API_KEY is required when WEB_SEARCH_PROVIDER=brave")
         if self.app_env == "demo" and self.outbox_batch_size != 1:
             raise ValueError("demo outbox processing requires OUTBOX_BATCH_SIZE=1")
         if (
@@ -191,6 +214,8 @@ class Settings(BaseSettings):
             ):
                 raise ValueError("CORS_ALLOWED_ORIGINS must contain exact HTTP(S) origins")
         if self.app_env in DEPLOYED_APP_ENVS:
+            if self.web_search_provider == "disabled":
+                raise ValueError("WEB_SEARCH_PROVIDER must be configured in deployed environments")
             if self.allowed_hosts == DEVELOPMENT_ALLOWED_HOSTS:
                 raise ValueError("ALLOWED_HOSTS must be explicit in deployed environments")
             if "127.0.0.1" not in self.allowed_host_list:

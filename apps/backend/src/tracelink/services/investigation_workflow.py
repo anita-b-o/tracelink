@@ -251,6 +251,38 @@ class InvestigationWorkflowService:
         self._recalculate(investigation, tasks)
         await self.session.flush()
 
+    async def fail_with_output(
+        self,
+        research_task_id: UUID,
+        celery_task_id: str,
+        output: ConnectorOutput,
+        *,
+        error_code: str,
+        error_message: str,
+    ) -> ResearchTaskResult | None:
+        locked = await self._lock_aggregate(research_task_id)
+        if locked is None:
+            return None
+        investigation, task, tasks = locked
+        if investigation.status is InvestigationStatus.CANCELLED:
+            if task.status is ResearchTaskStatus.RUNNING:
+                transition_research_task(task, ResearchTaskStatus.CANCELLED)
+            await self.session.flush()
+            return None
+        if (
+            task.status is not ResearchTaskStatus.RUNNING
+            or task.active_celery_task_id != celery_task_id
+        ):
+            return None
+        result = await ResearchArtifactService(self.session).persist(investigation.id, output)
+        transition_research_task(task, ResearchTaskStatus.FAILED)
+        task.last_error_code = error_code
+        task.last_error_message = error_message
+        task.result = result.model_dump(mode="json")
+        self._recalculate(investigation, tasks)
+        await self.session.flush()
+        return result
+
     async def acknowledge_cancellation(self, research_task_id: UUID, celery_task_id: str) -> None:
         locked = await self._lock_aggregate(research_task_id)
         if locked is None:

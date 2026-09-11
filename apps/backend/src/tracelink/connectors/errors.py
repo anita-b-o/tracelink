@@ -43,3 +43,33 @@ class ResponseTooLargeError(ConnectorError):
 class InvalidConnectorInputError(ConnectorError):
     code = "INVALID_CONNECTOR_INPUT"
     public_message = "the connector input is invalid"
+
+
+class WebSearchConfigurationError(ConnectorError):
+    code = "WEB_SEARCH_PROVIDER_DISABLED"
+    public_message = "a production web search provider is not configured"
+
+
+class WebSearchAuthenticationError(ConnectorError):
+    code = "WEB_SEARCH_AUTHENTICATION_FAILED"
+    public_message = "the web search provider rejected its credentials"
+
+
+class WebSearchRateLimitError(ConnectorError):
+    code = "WEB_SEARCH_RATE_LIMITED"
+    public_message = "the web search provider rate limit was reached"
+
+
+class WebSearchTimeoutError(ConnectorError):
+    code = "WEB_SEARCH_TIMEOUT"
+    public_message = "the web search provider timed out"
+
+
+class WebSearchUpstreamError(ConnectorError):
+    code = "WEB_SEARCH_UPSTREAM_FAILED"
+    public_message = "the web search provider could not complete the request"
+
+
+class WebSearchInvalidResponseError(ConnectorError):
+    code = "WEB_SEARCH_INVALID_RESPONSE"
+    public_message = "the web search provider returned an invalid response"

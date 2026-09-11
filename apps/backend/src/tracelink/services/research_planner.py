@@ -3,7 +3,6 @@ from tracelink.domain.models import Investigation, ResearchTask
 from tracelink.repositories.research_tasks import ResearchTaskRepository
 
 RESEARCH_PLAN = (
-    ResearchTaskType.IDENTIFY_ENTITY,
     ResearchTaskType.WEB_SEARCH,
     ResearchTaskType.DOMAIN_LOOKUP,
     ResearchTaskType.PUBLIC_MENTIONS,

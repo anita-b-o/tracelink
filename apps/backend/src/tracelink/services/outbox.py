@@ -63,6 +63,31 @@ async def enqueue_research_task_once(
     )
 
 
+async def enqueue_document_entities_once(
+    session: AsyncSession,
+    investigation_id: UUID,
+    document_id: UUID,
+    *,
+    queue: str | None = None,
+) -> OutboxEvent | None:
+    """Avoid duplicate extraction deliveries for one investigation/document pair."""
+    existing = await session.scalar(
+        select(OutboxEvent.id).where(
+            OutboxEvent.task_name == "tracelink.process_document_entities",
+            OutboxEvent.payload["args"][0].as_string() == str(investigation_id),
+            OutboxEvent.payload["args"][1].as_string() == str(document_id),
+        )
+    )
+    if existing is not None:
+        return None
+    return await enqueue_task(
+        session,
+        "tracelink.process_document_entities",
+        [str(investigation_id), str(document_id)],
+        queue=queue,
+    )
+
+
 class OutboxDispatcher:
     def __init__(self, session: AsyncSession, settings: Settings) -> None:
         self.session = session
