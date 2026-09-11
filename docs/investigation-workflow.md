@@ -37,8 +37,9 @@ cuando un worker reclama una ejecución nueva, no por una redelivery del mismo m
 
 ## Plan y ejecución
 
-El planner crea una task de cada tipo: `IDENTIFY_ENTITY`, `WEB_SEARCH`, `DOMAIN_LOOKUP` y
-`PUBLIC_MENTIONS`. Todas reutilizan `original_query`; `source_type` queda nulo. La combinación
+El planner crea tres tasks: `WEB_SEARCH`, `DOMAIN_LOOKUP` y `PUBLIC_MENTIONS`. Todas reutilizan
+`original_query`; `source_type` queda nulo. `IDENTIFY_ENTITY` permanece en el enum para leer datos
+legacy, pero ya no se planifica porque entities se procesa por Document. La combinación
 `(investigation_id, type)` es única y el insert usa `ON CONFLICT DO NOTHING`, por lo que repetir el
 planner no duplica trabajo.
 

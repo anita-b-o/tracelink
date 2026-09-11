@@ -21,12 +21,18 @@ se agregan fixtures sin Internet; el worker no requiere nuevas ramas.
   description, language, fecha ISO y hasta 100 links.
 - `rdap`: consulta el bootstrap DNS de IANA y el servicio autoritativo. Guarda el JSON canónico
   completo como Document.
-- `web_search`: usa un provider neutral, limita resultados y persiste Sources sin descargarlos. En
-  `test` usa un fake determinista; sin provider real queda `skipped`.
+- `web_search`: usa `WebSearchProvider`; la integración productiva inicial es Brave Search. Limita
+  y deduplica resultados, persiste Sources y descarga secuencialmente hasta
+  `WEB_SEARCH_FETCH_LIMIT` páginas con `public_html`. `fake` requiere selección explícita y sólo se
+  admite con `APP_ENV=test`; un provider ausente o un fallo externo hace fallar la task con código
+  observable. El adapter usa el endpoint, header `X-Subscription-Token` y máximo de 20 resultados
+  documentados en la [referencia oficial de Brave](https://api-dashboard.search.brave.com/api-reference/web/search/get).
 
-`WEB_SEARCH` y `PUBLIC_MENTIONS` usan búsqueda; `DOMAIN_LOOKUP` usa RDAP sólo para un dominio puro;
-`IDENTIFY_ENTITY` no inventa fuentes: la extracción de Fase 4 corre sobre Documents producidos por
-cualquier task o por URL ingestion.
+`WEB_SEARCH` y `PUBLIC_MENTIONS` usan el mismo provider; el segundo encierra la consulta entre
+comillas para buscar menciones exactas. `DOMAIN_LOOKUP` usa RDAP sólo para un dominio puro. El
+planner ya no crea `IDENTIFY_ENTITY`: la extracción corre durablemente sobre cada Document nuevo
+asociado a la investigación. Una task legacy de ese tipo queda `skipped` con semántica explícita de
+pipeline documental, nunca con `fake_research`.
 
 ## HTTP, SSRF y uso responsable
 
@@ -55,7 +61,9 @@ evita tráfico. Un error de cache degrada a miss; un error del rate limiter bloq
 El rate limiter usa Lua atómico y ventanas de un segundo por connector y host/provider. Si no hay
 capacidad espera al próximo bucket. Redirects y retries consumen cuota.
 
-`Source.normalized_url` y `url_hash` forman la identidad. Un advisory lock PostgreSQL serializa
+`Source.normalized_url` y `url_hash` forman la identidad. La metadata `search_provenance` conserva
+provider, query, rank, timestamp y task type de cada hallazgo aun cuando `WEB_SEARCH` y
+`PUBLIC_MENTIONS` encuentran la misma URL. Un advisory lock PostgreSQL serializa
 `get_or_create` sin borrar Sources legacy. Una Source puede tener versiones de Document; el
 contenido se deduplica por `(source_id, content_hash)`. URLs distintas conservan Documents
 separados para no perder procedencia.
@@ -65,8 +73,12 @@ Authorization, headers completos y bodies nunca llegan a logs o resultados de ta
 
 ## Errores y observabilidad
 
-Los errores públicos tienen códigos estables para timeout, rate limit, fetch, URL insegura,
-content type y tamaño. El worker persiste código, mensaje sanitizado y resumen pequeño.
+Los errores públicos tienen códigos estables para autenticación, timeout, rate limit y respuesta
+inválida del provider, además de fetch, URL insegura, content type y tamaño. Las fallas de búsqueda
+marcan la task `FAILED`; una búsqueda válida con cero resultados queda `COMPLETED`. Las fallas por
+página se resumen por código y preservan las Sources ya encontradas. SSRF, 4xx, contenido no
+soportado y tamaño excesivo se consideran skips controlados; timeout, rate limit, 5xx y red marcan
+la task `FAILED` sin descartar los artefactos parciales.
 
 Los logs JSON incluyen IDs de investigación/task, connector, host, status, duración, cache hit y
 retries. No incluyen API keys, query completa, URL completa ni contenido.

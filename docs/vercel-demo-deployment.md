@@ -109,6 +109,12 @@ Nunca usar prefijos `NEXT_PUBLIC_` para secretos.
 | `LLM_PROVIDER` | `openai` |
 | `LLM_MODEL` | `gpt-5.6-luna` |
 | `OPENAI_API_KEY` | cargar manualmente como secreto server-side |
+| `WEB_SEARCH_PROVIDER` | `brave` |
+| `WEB_SEARCH_API_KEY` | cargar manualmente como secreto server-side |
+| `WEB_SEARCH_TIMEOUT_SECONDS` | `8` |
+| `WEB_SEARCH_MAX_RESULTS` | `10` |
+| `WEB_SEARCH_FETCH_LIMIT` | `3` |
+| `FAKE_RESEARCH_MODE` | no configurar |
 | `METRICS_BEARER_TOKEN` | aleatorio; secreto |
 | `SENTRY_DSN` | opcional; secreto |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0` si Sentry no se usa |
@@ -183,7 +189,7 @@ No ejecutar migrations en build si Preview y Production pueden construir concurr
 | Search | Funcional con pgvector/pg_trgm e indexado completo |
 | Ask y Reports | Funcional con evidencia, outbox y crédito OpenAI; puede abstenerse/fallar explícitamente |
 | `DOMAIN_LOOKUP` | Conserva RDAP real existente |
-| `WEB_SEARCH` / `PUBLIC_MENTIONS` | `skipped`; no se configura provider real |
+| `WEB_SEARCH` / `PUBLIC_MENTIONS` | Brave Search con fetch HTML secuencial acotado |
 | Jobs sin visitas | Pendientes hasta el próximo request elegible |
 | Job individual > 240 s | Timeout/reintento tras lease; no garantizado en Hobby |
 

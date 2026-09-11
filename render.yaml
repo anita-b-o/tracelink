@@ -65,6 +65,10 @@ services:
         value: openai
       - key: OPENAI_API_KEY
         sync: false
+      - key: WEB_SEARCH_PROVIDER
+        value: brave
+      - key: WEB_SEARCH_API_KEY
+        sync: false
   - type: worker
     name: tracelink-worker
     runtime: docker
@@ -106,6 +110,10 @@ services:
         value: openai
       - key: OPENAI_API_KEY
         sync: false
+      - key: WEB_SEARCH_PROVIDER
+        value: brave
+      - key: WEB_SEARCH_API_KEY
+        sync: false
   - type: worker
     name: tracelink-outbox
     runtime: docker
@@ -146,6 +154,10 @@ services:
       - key: LLM_PROVIDER
         value: openai
       - key: OPENAI_API_KEY
+        sync: false
+      - key: WEB_SEARCH_PROVIDER
+        value: brave
+      - key: WEB_SEARCH_API_KEY
         sync: false
   - type: keyvalue
     name: tracelink-redis

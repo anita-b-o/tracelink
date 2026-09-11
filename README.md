@@ -106,7 +106,11 @@ Los valores predeterminados del backend apuntan a los puertos locales de Postgre
 | `RESEARCH_HTTP_MAX_RESPONSE_BYTES` | Máximo de bytes por respuesta | `5000000` |
 | `RESEARCH_HTTP_MAX_REDIRECTS` | Máximo de redirects revalidados | `5` |
 | `RESEARCH_HTTP_USER_AGENT` | User-Agent identificable de research | `TraceLink/0.1 ResearchConnector` |
-| `RESEARCH_WEB_SEARCH_MAX_RESULTS` | Límite de resultados por búsqueda | `10` |
+| `WEB_SEARCH_PROVIDER` | Provider backend (`disabled`, `fake` sólo test, `brave`) | `disabled` |
+| `WEB_SEARCH_API_KEY` | Secreto server-side requerido para Brave | vacío |
+| `WEB_SEARCH_TIMEOUT_SECONDS` | Timeout de la API de búsqueda | `8` |
+| `WEB_SEARCH_MAX_RESULTS` | Límite de resultados normalizados por búsqueda | `10` |
+| `WEB_SEARCH_FETCH_LIMIT` | Máximo secuencial de páginas descargadas por búsqueda | `3` |
 | `RESEARCH_CACHE_TTL_SECONDS` | TTL de cache Redis | `3600` |
 | `RESEARCH_CONNECTOR_REQUESTS_PER_SECOND` | Rate limit base por fuente | `2` |
 | `ENTITY_EXTRACTION_CHUNK_SIZE` | Tamaño reproducible de chunk en caracteres | `4000` |

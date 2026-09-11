@@ -79,6 +79,10 @@ services:
         value: openai
       - key: OPENAI_API_KEY
         sync: false
+      - key: WEB_SEARCH_PROVIDER
+        value: brave
+      - key: WEB_SEARCH_API_KEY
+        sync: false
 
   - type: keyvalue
     name: tracelink-demo-redis

@@ -75,11 +75,11 @@ clave, configurarla manualmente en Environment del servicio `tracelink-demo-api`
 | Search y Ask | Funcional con documentos indexados y OpenAI disponible |
 | Reports | Funcional de forma serial con evidencia suficiente y OpenAI disponible |
 | `DOMAIN_LOOKUP` | Usa el conector RDAP real existente cuando la query es un dominio válido |
-| `WEB_SEARCH` / `PUBLIC_MENTIONS` | `skipped`: no existe un provider real de búsqueda configurado |
-| `IDENTIFY_ENTITY` | `skipped` con la limitación diferida que ya declara el backend |
+| `WEB_SEARCH` / `PUBLIC_MENTIONS` | Brave Search → Sources → fetch HTML acotado → Documents |
+| `IDENTIFY_ENTITY` | No se planifica; entity extraction se encola por Document |
 
-No se crean providers nuevos ni se habilitan providers fake. Los providers de embeddings y LLM se
-fijan en `openai`, y el API no arranca sin una clave no vacía. Ask y Reports pueden abstenerse o
+No se habilitan providers fake. El provider web se fija en `brave`; los providers de embeddings y
+LLM se fijan en `openai`, y el API no arranca sin claves no vacías. Ask y Reports pueden abstenerse o
 fallar de forma explícita cuando no hay evidencia suficiente o OpenAI no está disponible.
 
 ## Cold starts y límites gratuitos
