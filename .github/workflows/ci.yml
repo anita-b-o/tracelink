@@ -224,6 +224,8 @@ jobs:
       ALLOWED_HOSTS: tracelink-api-staging.internal,backend,127.0.0.1
       METRICS_BEARER_TOKEN: ci-metrics-secret-at-least-32-chars
       OPENAI_API_KEY: ci-placeholder
+      WEB_SEARCH_PROVIDER: brave
+      WEB_SEARCH_API_KEY: ci-placeholder
       REGISTRATION_ENABLED: "true"
       IMAGE_TAG: staging
     steps:

@@ -26,6 +26,8 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:?set web search provider}
+      WEB_SEARCH_API_KEY: ${WEB_SEARCH_API_KEY:?set web search API key}
       METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN:?set metrics token}
     volumes: !reset []
     ports: !reset []
@@ -45,6 +47,8 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:?set web search provider}
+      WEB_SEARCH_API_KEY: ${WEB_SEARCH_API_KEY:?set web search API key}
     volumes: !reset []
 
   outbox:
@@ -62,6 +66,8 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:?set web search provider}
+      WEB_SEARCH_API_KEY: ${WEB_SEARCH_API_KEY:?set web search API key}
     volumes: !reset []
 
   migrate:
@@ -80,6 +86,8 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:?set web search provider}
+      WEB_SEARCH_API_KEY: ${WEB_SEARCH_API_KEY:?set web search API key}
     volumes: !reset []
 
   postgres:
